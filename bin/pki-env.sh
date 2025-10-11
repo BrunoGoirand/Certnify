@@ -507,6 +507,20 @@ index_set_filename_for_revoked() {
   }' "$index_file" > "${index_file}.tmp" && mv "${index_file}.tmp" "$index_file"
 }
 
+# --- Utility: deduplicate comma-separated lists (order-preserving) ---
+dedup_csv() {
+  awk -v str="$1" 'BEGIN{
+    n=split(str, a, ",");
+    for (i=1; i<=n; i++) {
+      gsub(/^[ \t]+|[ \t]+$/, "", a[i]);
+      if (a[i] != "" && !seen[a[i]]++) {
+        out = (out ? out "," a[i] : a[i]);
+      }
+    }
+    print out;
+  }'
+}
+
 # ============================================
 #  Layouts & OpenSSL config templates
 # ============================================

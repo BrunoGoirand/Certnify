@@ -525,6 +525,12 @@ if [[ -n "$SAN_DNS" || -n "$SAN_IP" || -n "$SAN_EMAIL" || -n "${SAN_URI:-}" ]]; 
   fi
 fi
 
+# Normalize SAN lists to unique values (order-preserving)
+SAN_DNS="$(dedup_csv "${SAN_DNS}")"
+SAN_IP="$(dedup_csv "${SAN_IP}")"
+SAN_EMAIL="$(dedup_csv "${SAN_EMAIL}")"
+SAN_URI="$(dedup_csv "${SAN_URI}")"
+
 # ---- CSR ----
 info "Creating CSR for CN='${CN}' (DN: C='${C}' O='${O}' OU='${OU}')…"
 if [[ "$QUIET_OPENSSL" == "1" ]]; then
