@@ -89,7 +89,14 @@ fi
 
 # 3) CN (canonical form only)
 if [[ -z "$TARGET" && -n "$CN" ]]; then
-  TARGET="certs/${CN}.cert.pem"
+  # Préfère le DERNIER certificat VALIDE (statut V) pour ce CN depuis l'index
+  serial_uc="$(awk -F'\t' -v pat="CN=${CN}" '$1=="V" && index($6, pat)>0 { s=$4 } END { if (s!="") print s }' "$INDEX_LOCAL" | tr '[:lower:]' '[:upper:]')"
+  if [[ -n "$serial_uc" && -f "newcerts/${serial_uc}.pem" ]]; then
+    TARGET="newcerts/${serial_uc}.pem"; resolved_serial="$serial_uc"
+  else
+    # Fallback historique (peut pointer un ancien cert si non rafraîchi)
+    TARGET="certs/${CN}.cert.pem"
+  fi
 fi
 
 [[ -n "$TARGET" && -f "$TARGET" ]] || die "Certificate not found.
@@ -104,7 +111,7 @@ SERIAL_HEX="$(openssl_serial "$TARGET")"
 [[ -n "$SERIAL_HEX" ]] || die "Unable to read serial from $TARGET"
 SERIAL_HEX="$(printf '%s' "$SERIAL_HEX" | tr '[:lower:]' '[:upper:]')"
 
-before_status="$(awk -F'\t' -v s="$SERIAL_HEX" '$4==s{print $1;exit}' "$INDEX_LOCAL" || true)"
+before_status="$(awk -F'\t' -v s="$SERIAL_HEX" '$4==s{st=$1} END{if (st!="") print st}' "$INDEX_LOCAL" || true)"
 if [[ "$before_status" == "R" ]]; then
   info "Serial $SERIAL_HEX is already revoked. Nothing to do."
   exit 0
