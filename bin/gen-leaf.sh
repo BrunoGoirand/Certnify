@@ -24,6 +24,79 @@
 #
 #  Project: https://github.com/brunogoirand/certnify
 # ===============================================================
+
+# ---------------------------------------------------------------
+#  Options and Environment Variables
+# ---------------------------------------------------------------
+#
+#  ── Identity / DN Fields ─────────────────────────────────────
+#  CN="<common name>"            # e.g., app.example.com or user@example.com
+#  O="<organization>"            # Optional, organization name
+#  OU="<org unit>"               # Optional, department/division
+#  C="<country>"                 # Optional, 2-letter ISO code (e.g., FR)
+#  DN_MAXLEN=128                 # Max DN component length (default: 128)
+#
+#  ── Certificate Profile / Purpose ─────────────────────────────
+#  ACTION="server|user|dev|email|doc"   # Preferred mode selector
+#  TYPE="server|user|dev|email|doc"     # Legacy alias (maps to ACTION)
+#  EXT_SECTION="<openssl.cnf section>"  # Overrides default section
+#
+#  Defaults by ACTION:
+#    server → EXT_SECTION=server_cert, DAYS=397
+#    user   → EXT_SECTION=client_cert, DAYS=825
+#    dev    → EXT_SECTION=code_sign,   DAYS=730
+#    email  → EXT_SECTION=smime,       DAYS=730
+#    doc    → EXT_SECTION=archive,     DAYS=3650
+#
+#  ── Intermediate Selection ────────────────────────────────────
+#  INT_DIR="intm-web-ca"         # Full or relative path to intermediate
+#  KIND="web|auth|code|smime|archive"  # Shorthand to derive INT_DIR
+#
+#  ── SAN (Subject Alternative Names) ───────────────────────────
+#  SAN="DNS:example.com,IP:10.0.0.1,email:admin@example.com"
+#      # Legacy combined syntax (auto-split into SAN_DNS/IP/EMAIL/URI)
+#
+#  SAN_DNS="example.com,www.example.com"     # Comma-separated DNS list
+#  SAN_IP="127.0.0.1,10.0.0.10"              # Comma-separated IPs
+#  SAN_EMAIL="admin@example.com,security@example.com"
+#  SAN_URI="https://example.com,urn:uuid:1234..."
+#
+#  ── Key Generation ────────────────────────────────────────────
+#  KEY_ALG="RSA|EC|EDDSA"        # Algorithm (default: RSA)
+#  KEY_SIZE="2048|4096"          # RSA key size (default: 4096)
+#  KEY_CURVE="prime256v1|secp384r1"   # EC curve (default: prime256v1)
+#  KEY_EDDSA="Ed25519|Ed448"     # For EdDSA (default: Ed25519)
+#
+#  FORCE_NEW_KEY=1               # Régénère une nouvelle clé privée même si private/<CN>.key.pem existe (sauvegarde .bak auto)
+#  FORCE_NEW_KEY=rotate          # N’écrase rien : nouvelle clé/CSR/cert sous <CN>-<tag>, puis renommés en <CN>-<SERIAL> après émission
+#
+#  ── Validity / Lifetime ───────────────────────────────────────
+#  DAYS=825                      # Leaf validity (default depends on ACTION)
+#
+#  ── Behaviour / Safety Switches ───────────────────────────────
+#  ALLOW_DUPLICATE_CN=1          # Skip duplicate CN check
+#  ALLOW_SIGN_WITH_REVOKED_INT=1 # Force issuance even if intermediate revoked
+#  AUTO_UPDATEDB=1               # Auto-update OpenSSL DB (default: 1)
+#  REFRESH_CRL_BEFORE_ISSUE=1    # Rebuild CRL before issuing (default: 0)
+#  CRL_DAYS=7                    # CRL validity in days (default: 7)
+#
+#  ── Output Control ────────────────────────────────────────────
+#  QUIET_OPENSSL=1               # Suppress OpenSSL chatter (default: 1)
+#
+#  ── File Layout (resolved automatically) ──────────────────────
+#  KEY_PATH="intm-*/private/<CN>.key.pem"
+#  CSR_PATH="intm-*/csr/<CN>.csr.pem"
+#  CRT_PATH="intm-*/certs/<CN>.cert.pem"
+#  CHAIN_PATH="intm-*/certs/<CN>.fullchain.cert.pem"
+#
+#  ── Examples ──────────────────────────────────────────────────
+#  make server CN="app.example.com" KIND="web"
+#  make user   CN="user@example.com" KIND="auth"
+#  make code   CN="signer" KIND="code" SAN_URI="urn:signer:1234"
+#  make email  CN="contact@example.com" KIND="smime"
+#  make doc    CN="archive-2025" KIND="archive"
+#
+# ---------------------------------------------------------------
 set -euo pipefail
 source "$(dirname "$0")/pki-env.sh"
 
@@ -134,9 +207,11 @@ DN_MAXLEN="${DN_MAXLEN:-128}"
 
 DAYS="${DAYS:-825}"                 # ~27 months typical leaf
 
-#KEY_ALG="${KEY_ALG:-RSA}"
-#KEY_SIZE="${KEY_SIZE:-2048}"
-#KEY_CURVE="${KEY_CURVE:-prime256v1}"
+# ---- Behaviour / Safety Switches ----
+# 0 (défaut)  : comportement normal
+# 1           : force une nouvelle clé (sauvegarde l’ancienne en .bak)
+# rotate      : garde l’ancienne intacte et écrit la nouvelle série (key/csr/cert) sous un suffixe
+FORCE_NEW_KEY="${FORCE_NEW_KEY:-0}"   # 0|1|rotate
 
 # trim/normalize
 # RSA | EC | EdDSA
@@ -217,9 +292,23 @@ ensure_intermediate_layout "$INT_DIR"
 INT_CNF="$ROOT_DIR/$INT_DIR/openssl.cnf"
 [[ -f "$INT_CNF" ]] || die "Intermediate openssl.cnf not found: $INT_CNF (create the intermediate first)"
 
-KEY_PATH="$INT_DIR/private/${CN}.key.pem"
-CSR_PATH="$INT_DIR/csr/${CN}.csr.pem"
-CRT_PATH="$INT_DIR/certs/${CN}.cert.pem"
+# ---- Rotate mode (chemin suffixé) ----
+ROTATE_MODE=0
+ROTATE_TAG=""
+if [[ "${FORCE_NEW_KEY:-0}" == "rotate" ]]; then
+  ROTATE_MODE=1
+  ROTATE_TAG="r$(date +%Y%m%d%H%M%S 2>/dev/null || date +%s)"
+fi
+
+# Base des noms de fichiers pour cette émission
+BASE_CN="${CN}"
+if [[ "$ROTATE_MODE" == "1" ]]; then
+  BASE_CN="${CN}-${ROTATE_TAG}"
+fi
+
+KEY_PATH="$INT_DIR/private/${BASE_CN}.key.pem"
+CSR_PATH="$INT_DIR/csr/${BASE_CN}.csr.pem"
+CRT_PATH="$INT_DIR/certs/${BASE_CN}.cert.pem"
 
 # ---- Preflight: block issuance if intermediate is revoked/disabled ----
 INT_CA_CERT="$INT_DIR/certs/ca.cert.pem"
@@ -343,8 +432,31 @@ if [[ "${ALLOW_DUPLICATE_CN:-0}" != "1" ]]; then
 fi
 
 # ---- Private key ----
+# Si FORCE_NEW_KEY=1 et une clé existe, on la sauvegarde puis on régénère.
+if [[ -s "$KEY_PATH" && "${FORCE_NEW_KEY:-0}" == "1" ]]; then
+  ts="$(date +%Y%m%d%H%M%S 2>/dev/null || date +%s)"
+  bak="${KEY_PATH%.key.pem}.key.${ts}.bak.pem"
+  info "FORCE_NEW_KEY=1 → previous key backup to: $bak"
+  # Sauvegarde avec permissions strictes (600). install si possible, fallback cp.
+  if install -m 0600 "$KEY_PATH" "$bak" 2>/dev/null; then
+    :
+  else
+    cp -p "$KEY_PATH" "$bak"
+    chmod 600 "$bak" 2>/dev/null || true
+  fi
+
+  # Détruire l’ancienne clé avant régénération (secure delete si dispo)
+  if command -v shred >/dev/null 2>&1; then
+    shred -u "$KEY_PATH" || rm -f "$KEY_PATH"
+  else
+    rm -f "$KEY_PATH"
+  fi
+fi
+
+# En mode rotate, le KEY_PATH est déjà suffixé → on génère systématiquement une nouvelle clé si absente
 if [[ ! -s "$KEY_PATH" ]]; then
   gen_private_key "$KEY_ALG" "$KEY_SIZE" "$KEY_CURVE" "$KEY_PATH"
+  chmod 600 "$KEY_PATH" 2>/dev/null || true
 else
   info "Leaf private key already exists: $KEY_PATH (skip)"
 fi
@@ -487,6 +599,24 @@ install -m 0644 "$TMPCRT" "$CRT_PATH"
 rm -f "$TMPCRT"
 chmod 444 "$CRT_PATH"
 info "Leaf certificate ready: $CRT_PATH"
+
+# ---- Rotate: renommer les artefacts en <CN>-<SERIAL> ----
+if [[ "$ROTATE_MODE" == "1" && -n "$SERIAL_HEX_ACTUAL" ]]; then
+  NEW_BASE="${CN}-${SERIAL_HEX_ACTUAL}"
+  NEW_KEY="$INT_DIR/private/${NEW_BASE}.key.pem"
+  NEW_CRT="$INT_DIR/certs/${NEW_BASE}.cert.pem"
+  NEW_CSR="$INT_DIR/csr/${NEW_BASE}.csr.pem"
+
+  # Renommer si les chemins actuels diffèrent
+  [[ "$KEY_PATH" != "$NEW_KEY" && -f "$KEY_PATH" ]] && mv -f "$KEY_PATH" "$NEW_KEY"
+  [[ "$CRT_PATH" != "$NEW_CRT" && -f "$CRT_PATH" ]] && mv -f "$CRT_PATH" "$NEW_CRT"
+  [[ -f "$CSR_PATH" ]] && [[ "$CSR_PATH" != "$NEW_CSR" ]] && mv -f "$CSR_PATH" "$NEW_CSR"
+
+  KEY_PATH="$NEW_KEY"
+  CRT_PATH="$NEW_CRT"
+  CSR_PATH="$NEW_CSR"
+  info "Rotate: artefacts renommés → ${NEW_BASE}.*.pem"
+fi
 
 # ---- Full chain next to the cert (optional but handy) ----
 CHAIN_PATH="${CRT_PATH%.cert.pem}.fullchain.cert.pem"

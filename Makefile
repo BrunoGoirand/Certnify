@@ -258,6 +258,7 @@ server:
 	C="$(C)" O="$(O)" OU="$(OU)" \
 	SAN_DNS="$(or $(SAN_DNS),$(CN))" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
+	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
 	bin/gen-server.sh
 
@@ -269,6 +270,7 @@ user:
 	C="$(C)" O="$(O)" OU="$(OU)" \
 	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
+	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
 	bin/gen-user.sh
 
@@ -279,6 +281,7 @@ dev:
 	C="$(C)" O="$(O)" OU="$(OU)" \
 	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
+	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
 	bin/gen-code.sh
 
@@ -290,6 +293,7 @@ email:
 	C="$(C)" O="$(O)" OU="$(OU)" \
 	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
+	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
 	bin/gen-email.sh
 
@@ -300,6 +304,7 @@ doc:
 	C="$(C)" O="$(O)" OU="$(OU)" \
 	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
+	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
 	bin/gen-archive.sh
 
