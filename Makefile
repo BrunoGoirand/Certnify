@@ -253,10 +253,9 @@ doc:    PROFILE ?= archive
 # Server certs (legacy SAN kept + SAN_* pour scripts modernes)
 server:
 	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	SAN="$(or $(SAN),DNS:$(CN))" \
 	DAYS="$(DAYS)" PROFILE="$(PROFILE)" \
 	C="$(C)" O="$(O)" OU="$(OU)" \
-	SAN_DNS="$(or $(SAN_DNS),$(CN))" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" \
+	SAN_DNS="$(or $(SAN_DNS),$(CN))" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
@@ -265,10 +264,9 @@ server:
 # User (client auth)
 user:
 	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	SAN="$(SAN)" \
 	DAYS="$(DAYS)" PROFILE="$(PROFILE)" \
 	C="$(C)" O="$(O)" OU="$(OU)" \
-	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" \
+	SAN_DNS="$(or $(SAN_DNS),$(CN))" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
@@ -279,7 +277,7 @@ dev:
 	INT_DIR="$(INT_DIR)" CN="$(CN)" \
 	DAYS="$(DAYS)" PROFILE="$(PROFILE)" \
 	C="$(C)" O="$(O)" OU="$(OU)" \
-	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" \
+	SAN_DNS="$(or $(SAN_DNS),$(CN))" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
@@ -288,10 +286,9 @@ dev:
 # S/MIME
 email:
 	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	SAN="$(SAN)" \
 	DAYS="$(DAYS)" PROFILE="$(PROFILE)" \
 	C="$(C)" O="$(O)" OU="$(OU)" \
-	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" \
+	SAN_DNS="$(or $(SAN_DNS),$(CN))" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
@@ -302,7 +299,7 @@ doc:
 	INT_DIR="$(INT_DIR)" CN="$(CN)" \
 	DAYS="$(DAYS)" PROFILE="$(PROFILE)" \
 	C="$(C)" O="$(O)" OU="$(OU)" \
-	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" \
+	SAN_DNS="$(or $(SAN_DNS),$(CN))" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \

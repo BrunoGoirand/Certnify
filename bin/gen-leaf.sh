@@ -472,6 +472,12 @@ cp "$INT_CNF" "$REQ_CNF_TMP"
 # 2) Render DN placeholders and drop empty DN lines
 render_req_cnf_with_dn "$REQ_CNF_TMP" "$REQ_CNF_DN" "$C" "$O" "$OU" "$CN"
 
+# Normalize SAN lists to unique values (order-preserving)
+SAN_DNS="$(dedup_csv "${SAN_DNS}")"
+SAN_IP="$(dedup_csv "${SAN_IP}")"
+SAN_EMAIL="$(dedup_csv "${SAN_EMAIL}")"
+SAN_URI="$(dedup_csv "${SAN_URI}")"
+
 # 3) Append SAN section if provided (any of SAN_* present)
 if [[ -n "$SAN_DNS" || -n "$SAN_IP" || -n "$SAN_EMAIL" || -n "${SAN_URI:-}" ]]; then
   {
@@ -524,12 +530,6 @@ if [[ -n "$SAN_DNS" || -n "$SAN_IP" || -n "$SAN_EMAIL" || -n "${SAN_URI:-}" ]]; 
     done
   fi
 fi
-
-# Normalize SAN lists to unique values (order-preserving)
-SAN_DNS="$(dedup_csv "${SAN_DNS}")"
-SAN_IP="$(dedup_csv "${SAN_IP}")"
-SAN_EMAIL="$(dedup_csv "${SAN_EMAIL}")"
-SAN_URI="$(dedup_csv "${SAN_URI}")"
 
 # ---- CSR ----
 info "Creating CSR for CN='${CN}' (DN: C='${C}' O='${O}' OU='${OU}')…"
