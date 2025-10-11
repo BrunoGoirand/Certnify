@@ -1,0 +1,30 @@
+# --- Fichiers système / éditeurs ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.bak
+*.tmp
+*.log
+
+# --- Build / dist ---
+root/
+intm-web-ca/
+intm-auth-ca/
+intm-code-ca/
+intm-smime-ca/
+intm-archive-ca/
+
+# --- IDE ---
+.vscode/
+.idea/
+*.iml
+
+# --- Sauvegardes / archives ---
+*.zip
+*.tar
+*.gz
+*.tgz
+
+# --- Répertoire draft (non versionné) ---
+draft/
