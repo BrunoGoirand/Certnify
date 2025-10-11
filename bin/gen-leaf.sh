@@ -600,6 +600,14 @@ rm -f "$TMPCRT"
 chmod 444 "$CRT_PATH"
 info "Leaf certificate ready: $CRT_PATH"
 
+# After installing $CRT_PATH and before building the full chain / running verify
+if [[ -n "$SAN_DNS$SAN_IP$SAN_EMAIL$SAN_URI" ]]; then
+  if ! "$OPENSSL" x509 -in "$CRT_PATH" -noout -text | grep -q "Subject Alternative Name"; then
+    die "The issued certificate does not contain a SAN. Ensure '$INT_CNF' has 'copy_extensions = copy' in [CA_default], \
+or pass -extfile \"$REQ_CNF_DN\" at signing time."
+  fi
+fi
+
 # ---- Rotate: renommer les artefacts en <CN>-<SERIAL> ----
 if [[ "$ROTATE_MODE" == "1" && -n "$SERIAL_HEX_ACTUAL" ]]; then
   NEW_BASE="${CN}-${SERIAL_HEX_ACTUAL}"

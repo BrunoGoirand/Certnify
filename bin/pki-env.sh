@@ -619,6 +619,7 @@ default_md        = sha256
 preserve          = no
 policy            = policy_loose
 unique_subject    = no
+copy_extensions = copy
 
 [ policy_loose ]
 countryName             = optional
