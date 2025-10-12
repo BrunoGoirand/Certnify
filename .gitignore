@@ -16,7 +16,7 @@ intm-smime-ca/
 intm-archive-ca/
 
 # --- IDE ---
-#.vscode/
+.vscode/
 .idea/
 *.iml
 
