@@ -109,8 +109,6 @@ help:
 OPENSSL      ?= openssl
 export OPENSSL := $(strip $(OPENSSL))
 
-# default 20 years
-DAYS          ?= 7300
 # RSA | EC | EdDSA | Ed25519 | Ed448
 KEY_ALG       ?= RSA
 # RSA only
@@ -124,7 +122,6 @@ KEY_EDDSA     ?= Ed25519
 ROOT_PATHLEN  ?= 1
 
 # Normalisation/strip
-export DAYS         := $(strip $(DAYS))
 export KEY_ALG      := $(strip $(KEY_ALG))
 export KEY_SIZE     := $(strip $(KEY_SIZE))
 export KEY_CURVE    := $(strip $(KEY_CURVE))
@@ -139,6 +136,7 @@ OU            ?=
 SAN_DNS       ?=
 SAN_IP        ?=
 SAN_EMAIL     ?=
+SAN_URI       ?=
 
 # Verbosity aligned with scripts
 QUIET_OPENSSL ?= 1
@@ -217,14 +215,6 @@ KIND    ?= $(DEFAULT_KIND_$(1))
 INT_DIR ?= intm-$(KIND)-ca
 endef
 
-# ===== Auto-mapping par cible (sans eval) =====
-# KIND/INT_DIR
-DEFAULT_KIND_server = web
-DEFAULT_KIND_user   = auth
-DEFAULT_KIND_dev    = code
-DEFAULT_KIND_email  = smime
-DEFAULT_KIND_doc    = archive
-
 server: KIND ?= $(DEFAULT_KIND_server)
 server: INT_DIR ?= intm-$(KIND)-ca
 server: DAYS ?= 397
@@ -232,12 +222,12 @@ server: PROFILE ?= server_cert
 
 user:   KIND ?= $(DEFAULT_KIND_user)
 user:   INT_DIR ?= intm-$(KIND)-ca
-user:   DAYS ?= 825
+user:   DAYS ?= 730
 user:   PROFILE ?= usr_cert
 
 dev:    KIND ?= $(DEFAULT_KIND_dev)
 dev:    INT_DIR ?= intm-$(KIND)-ca
-dev:    DAYS ?= 730
+dev:    DAYS ?= 1095
 dev:    PROFILE ?= code_sign
 
 email:  KIND ?= $(DEFAULT_KIND_email)
@@ -247,7 +237,7 @@ email:  PROFILE ?= smime
 
 doc:    KIND ?= $(DEFAULT_KIND_doc)
 doc:    INT_DIR ?= intm-$(KIND)-ca
-doc:    DAYS ?= 3650
+doc:    DAYS ?= 1095
 doc:    PROFILE ?= archive
 
 # Server certs (legacy SAN kept + SAN_* pour scripts modernes)

@@ -205,8 +205,6 @@ O="${O:-}"
 OU="${OU:-}"
 DN_MAXLEN="${DN_MAXLEN:-128}"
 
-DAYS="${DAYS:-825}"                 # ~27 months typical leaf
-
 # ---- Behaviour / Safety Switches ----
 # 0 (défaut)  : comportement normal
 # 1           : force une nouvelle clé (sauvegarde l’ancienne en .bak)
