@@ -13,5 +13,5 @@ source "${SCRIPT_DIR}/pki-env.sh"
 
 # Une seule chose à dire: ACTION=server – gen-leaf fait tout le reste.
 env ACTION="email" CN="${CN}" \
-  SAN="${SAN:-DNS:${CN}}" DAYS="${DAYS:-397}" PROFILE="${PROFILE:-server_cert}" \
+  SAN="${SAN:-DNS:${CN}}" DAYS="${DAYS:-730}" PROFILE="${PROFILE:-server_cert}" \
   "${SCRIPT_DIR}/gen-leaf.sh"
