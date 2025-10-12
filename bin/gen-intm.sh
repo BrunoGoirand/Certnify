@@ -24,6 +24,73 @@
 #
 #  Project: https://github.com/brunogoirand/certnify
 # ===============================================================
+
+# ===============================================================
+#  Environment Options (for Certnify scripts)
+# ===============================================================
+# These environment variables control script behavior and defaults.
+# All variables are optional unless specified otherwise.
+#
+# === Identification ===
+# CN                    Common Name (ex: "GOIRAND (Web)")
+# C                     Country code (2 letters, ex: "FR")
+# O                     Organization (optional)
+# OU                    Organizational Unit (optional)
+# DAYS                  Certificate validity in days (default: 3650 for intermediates)
+#
+# === Key Parameters ===
+# KEY_ALG               Key algorithm: RSA | EC | EDDSA   (default: RSA)
+# KEY_SIZE              RSA key size in bits (default: 4096)
+# KEY_CURVE             EC curve name (default: prime256v1)
+# KEY_EDDSA             EdDSA type: Ed25519 | Ed448 (default: Ed25519)
+#
+# === Directories & Layout ===
+# ROOT_DIR              Root CA directory (default: ./root)
+# INT_DIR               Intermediate CA directory (has priority over KIND)
+# KIND                  Shortcut for intermediate type ("web", "auth", "code", "smime", "archive")
+#                       Expands automatically to "intm-${KIND}-ca" if INT_DIR is unset.
+#
+# === Behavior Controls ===
+# QUIET_OPENSSL         1 to silence OpenSSL output (default: 1)
+# DEBUG                 1 to enable verbose debug traces (default: 0)
+#
+# === Key Management ===
+# REKEY_ON_ALG_CHANGE   1 = regenerate key if algorithm/size/curve changes (default: 1)
+# REKEY_ON_REVOKE       1 = regenerate key if previous cert revoked (default: 1)
+# FORCE_REUSE_KEY       1 = force reuse of existing private key even if rekey would trigger
+# ROTATE_KEY            1 = rotate key and reissue certificate regardless of validity
+#
+# === Intermediate Issuance ===
+# FORCE_REISSUE         1 = force regeneration of certificate even if still valid
+# REISSUE_IF_EXPIRES_BEFORE  Seconds before expiry to trigger auto-reissue (default: 2592000 = 30d)
+#
+# === Revocation Awareness ===
+# INTM_REVOKED          1 = manual override: treat previous intermediate as revoked
+#
+# === DN Validation ===
+# DN_MAXLEN             Maximum length for DN components (default: 128)
+#
+# === Post-Generation Behavior ===
+# CRL_UPDATE            1 = automatically rebuild CRLs after issuance or revocation
+# CRL_DAYS              CRL validity in days when CRL_UPDATE=1 (default: 7)
+#
+# === File Naming ===
+# FORCE_NEW_KEY         Alias of ROTATE_KEY (for backward compatibility)
+#
+# === Miscellaneous ===
+# OPENSSL               Path to OpenSSL binary (default: openssl)
+# ROOT_CNF              Root configuration file path (auto-resolved)
+# INT_CNF               Intermediate configuration file path (auto-resolved)
+#
+# Notes:
+# - INT_DIR always takes precedence over KIND.
+# - Scripts are idempotent by design: if the target CA/cert already exists
+#   and remains valid, no regeneration occurs unless forced.
+# - To regenerate intentionally, use one of:
+#       FORCE_REISSUE=1
+#       ROTATE_KEY=1
+#       REKEY_ON_ALG_CHANGE=1
+# ===============================================================
 set -euo pipefail
 source "$(dirname "$0")/pki-env.sh"
 

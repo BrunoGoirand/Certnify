@@ -24,6 +24,78 @@
 #
 #  Project: https://github.com/brunogoirand/certnify
 # ===============================================================
+
+# ===============================================================
+#  Environment Options — Root CA Generator (gen-root.sh)
+# ===============================================================
+# This script initializes a new *Root Certificate Authority*.
+# It is idempotent: if a valid root already exists and the DN matches,
+# no overwrite occurs unless manually removed.
+#
+# === Identification ===
+# CN                    Common Name (default: "Root CA")
+# C                     Country code (2 letters, ex: "FR")
+# O                     Organization (optional)
+# OU                    Organizational Unit (optional)
+# DN_MAXLEN             Maximum length per DN field (default: 128)
+#
+# === Validity & Lifetime ===
+# DAYS                  Certificate validity in days (default: 7300 → ~20 years)
+# ROOT_PATHLEN          Path length constraint for intermediates (default: 1)
+#                       Set empty ("") to omit the constraint.
+#
+# === Key Parameters ===
+# KEY_ALG               Key algorithm (RSA | EC | EdDSA) — default: RSA
+# KEY_SIZE              RSA key size (bits) — default: 4096
+# KEY_CURVE             EC curve name — default: prime256v1
+#                       Other options: secp384r1, secp521r1
+# KEY_EDDSA             EdDSA key type — default: Ed25519
+#                       Other option: Ed448
+#
+# === Behavior & Execution ===
+# QUIET_OPENSSL         1 = suppress OpenSSL command output (default: 1)
+# DEBUG                 1 = enable verbose debug traces
+# OPENSSL               Path to the OpenSSL binary (default: openssl)
+#
+# === File Layout ===
+# ROOT_DIR              Working directory for the root CA (default: current ./root)
+# ROOT_CNF              Path to the root’s OpenSSL configuration (auto-resolved)
+#
+# === Behavior & Safety Rules ===
+# - If an existing root certificate is found:
+#     → DN (RFC2253) is compared with the requested one.
+#     → If DN differs, the script aborts safely (no overwrite).
+# - If both private key and certificate exist:
+#     → A SPKI pin comparison ensures key↔cert integrity.
+# - If key exists but cert missing:
+#     → The key is reused; algorithm/curve/size parameters are ignored.
+#
+# === Output Files ===
+# root/private/ca.key.pem        Private key (chmod 600)
+# root/certs/ca.cert.pem         Self-signed root certificate (chmod 444)
+# root/openssl.cnf               OpenSSL configuration (auto-generated)
+# root/ca.meta                   Immutable metadata file with:
+#                                 • DN / issuer
+#                                 • serial / pathLen / SKI / SPKI
+#                                 • OpenSSL version / creation timestamp
+#
+# === Security Notes ===
+# - The root certificate is self-signed using SHA-256 (except EdDSA).
+# - A pathLen constraint is set to limit intermediate depth unless disabled.
+# - All outputs are permissioned strictly (600 for private, 444 for public).
+# - Metadata is always written atomically and immutable.
+#
+# === Example Usage ===
+#   # Minimal invocation (default RSA root)
+#   make root CN="Root CA"
+#
+#   # EC root with custom curve and country
+#   make root CN="Corp Root CA" C="FR" KEY_ALG="EC" KEY_CURVE="secp384r1"
+#
+#   # Ed25519 root (no digest argument needed)
+#   make root CN="Lightweight Root" KEY_ALG="EdDSA" KEY_EDDSA="Ed25519"
+#
+# ===============================================================
 set -euo pipefail
 source "$(dirname "$0")/pki-env.sh"
 
