@@ -115,7 +115,7 @@ O="${O:-}"
 OU="${OU:-}"
 DN_MAXLEN="${DN_MAXLEN:-128}"
 
-DAYS="${DAYS:-7300}"                 # ~20 years typical root
+DAYS="${DAYS:-5475}"                  # 15 years
 
 #KEY_ALG="${KEY_ALG:-RSA}"            # RSA | EC | EdDSA
 #KEY_SIZE="${KEY_SIZE:-4096}"         # used if RSA only
