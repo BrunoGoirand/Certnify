@@ -58,6 +58,8 @@ release_locks() {
 
 ensure_safe_int_dir() {
   local raw="${1:-}"
+  local abs=""
+  local canonical=""
 
   [[ -n "$raw" ]] || die "INT_DIR must not be empty"
   [[ "$raw" != "/" ]] || die "INT_DIR '/' is forbidden"
@@ -74,10 +76,57 @@ ensure_safe_int_dir() {
   fi
 
   case "/$raw/" in
-    */../*|*/./../*|*/.././*|*/../../*)
+    */../*)
       die "INT_DIR must not contain '..': '$raw'"
       ;;
   esac
+
+  if [[ "$raw" == /* ]]; then
+    abs="$raw"
+  elif [[ "$raw" == "." ]]; then
+    abs="$ROOT_DIR"
+  else
+    abs="$ROOT_DIR/$raw"
+  fi
+
+  canonical="$(canonicalize_path_allow_missing "$abs")"
+  case "$canonical" in
+    "$ROOT_DIR"|"$ROOT_DIR"/*) ;;
+    *)
+      die "INT_DIR resolves outside workspace: '$raw' -> '$canonical'"
+      ;;
+  esac
+}
+
+canonicalize_path_allow_missing() {
+  local target="${1:-}"
+  local missing_suffix=""
+  local probe=""
+  local resolved=""
+
+  [[ -n "$target" ]] || die "canonicalize_path_allow_missing: path is required"
+
+  if [[ "$target" != /* ]]; then
+    die "canonicalize_path_allow_missing: absolute path expected, got '$target'"
+  fi
+
+  probe="$target"
+  while [[ ! -e "$probe" ]]; do
+    local base
+    base="$(basename "$probe")"
+    missing_suffix="/${base}${missing_suffix}"
+    probe="$(dirname "$probe")"
+    [[ -n "$probe" && "$probe" != "." ]] || probe="/"
+    [[ "$probe" != "/" || -d "/" ]] || die "Cannot resolve path ancestor for '$target'"
+  done
+
+  if [[ -d "$probe" ]]; then
+    resolved="$(cd "$probe" && pwd -P)"
+  else
+    resolved="$(cd "$(dirname "$probe")" && pwd -P)/$(basename "$probe")"
+  fi
+
+  printf '%s%s\n' "$resolved" "$missing_suffix"
 }
 
 # ---- OpenSSL presence + version (refuse LibreSSL) ----
@@ -156,6 +205,7 @@ require_int_dir_for_action() {
   # 1) Si INT_DIR est fourni → on normalise et on gère la cohérence
   if [[ -n "$dir" ]]; then
     dir="$(normalize_int_dir "$dir")"
+    ensure_safe_int_dir "$dir"
 
     # Déduire un kind potentiel à partir d'INT_DIR si possible
     local dir_kind=""
@@ -204,6 +254,7 @@ require_int_dir_for_action() {
     fi
     # Normalise au cas où
     INT_DIR="$(normalize_int_dir "$INT_DIR")"
+    ensure_safe_int_dir "$INT_DIR"
     KIND="$kind"
   fi
 
@@ -221,6 +272,7 @@ require_int_dir_for_action() {
 require_int_dir_with_kind() {
   [[ -n "${KIND:-}" ]] || die "KIND manquant"
   [[ -n "${INT_DIR:-}" ]] || die "INT_DIR manquant"
+  ensure_safe_int_dir "$INT_DIR"
   local expected="intm-${KIND}-ca"
   [[ "$INT_DIR" == "$expected" ]] || die "Cohérence KIND/INT_DIR invalide: attendu '$expected', reçu '$INT_DIR'"
   [[ -f "${INT_DIR}/openssl.cnf" ]] || die "openssl.cnf introuvable: ${INT_DIR}/openssl.cnf"
@@ -237,8 +289,10 @@ esc_sed() { printf '%s' "${1-}" | sed -e 's/[\/&\\]/\\&/g'; }
 
 validate_len() {
   local label="$1" val="$2" maxlen="$3"
-  if (( ${#val} > maxlen )); then
-    die "$label too long (${#val} > ${maxlen} bytes): '$val'"
+  local bytes
+  bytes="$(printf '%s' "$val" | LC_ALL=C wc -c | tr -d '[:space:]')"
+  if (( bytes > maxlen )); then
+    die "$label too long (${bytes} > ${maxlen} bytes): '$val'"
   fi
 }
 
@@ -423,6 +477,7 @@ pubkey_sha256_b64() {
 
 inspect_private_key_metadata() {
   local key_path="$1"
+  # Output variables intentionally set as globals for the caller.
   DETECTED_KEY_ALG=""
   DETECTED_KEY_SIZE=""
   DETECTED_KEY_CURVE=""
@@ -435,13 +490,17 @@ inspect_private_key_metadata() {
   [[ -n "$pkey_text" ]] || return 0
 
   if grep -q '^Private-Key: (' <<<"$pkey_text"; then
+    # shellcheck disable=SC2034
     DETECTED_KEY_ALG="RSA"
+    # shellcheck disable=SC2034
     DETECTED_KEY_SIZE="$(awk -F'[() ]' '/Private-Key:/ {for (i=1;i<=NF;i++) if ($i ~ /^[0-9]+$/) {print $i; exit}}' <<<"$pkey_text")"
     return 0
   fi
 
   if grep -Eq 'ASN1 OID:|NIST CURVE:' <<<"$pkey_text"; then
+    # shellcheck disable=SC2034
     DETECTED_KEY_ALG="EC"
+    # shellcheck disable=SC2034
     DETECTED_KEY_CURVE="$(
       awk -F': *' '
         /ASN1 OID:/ {print $2; found=1; exit}
@@ -452,13 +511,17 @@ inspect_private_key_metadata() {
   fi
 
   if grep -q 'ED25519' <<<"$pkey_text"; then
+    # shellcheck disable=SC2034
     DETECTED_KEY_ALG="ED25519"
+    # shellcheck disable=SC2034
     DETECTED_KEY_EDDSA="Ed25519"
     return 0
   fi
 
   if grep -q 'ED448' <<<"$pkey_text"; then
+    # shellcheck disable=SC2034
     DETECTED_KEY_ALG="ED448"
+    # shellcheck disable=SC2034
     DETECTED_KEY_EDDSA="Ed448"
     return 0
   fi
@@ -475,7 +538,7 @@ ensure_serial_monotonic() {
 
   local max=0
   # BSD/macOS-safe: pur bash arithmétique base 16
-  while IFS=$'\t' read -r status expiry rev serial rest; do
+  while IFS=$'\t' read -r _status _expiry _rev serial _rest; do
     [[ -z "$serial" ]] && continue
     # strip espaces/CR, garder hex
     serial="${serial//$'\r'/}"
@@ -530,11 +593,16 @@ write_ca_meta() {
   # --- helpers locaux ---
   trim() { local s="${1-}"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; printf '%s' "$s"; }
 
-  local alg_raw="$(trim "${KEY_ALG_IN:-}")"
-  local alg_lc="$(echo "$alg_raw" | tr '[:upper:]' '[:lower:]')"
-  local key_size_raw="$(trim "${KEY_SIZE_IN:-}")"
-  local key_curve_raw="$(trim "${KEY_CURVE_IN:-}")"
-  local key_eddsa_raw="$(trim "${KEY_EDDSA_IN:-}")"
+  local alg_raw
+  local alg_lc
+  local key_size_raw
+  local key_curve_raw
+  local key_eddsa_raw
+  alg_raw="$(trim "${KEY_ALG_IN:-}")"
+  alg_lc="$(echo "$alg_raw" | tr '[:upper:]' '[:lower:]')"
+  key_size_raw="$(trim "${KEY_SIZE_IN:-}")"
+  key_curve_raw="$(trim "${KEY_CURVE_IN:-}")"
+  key_eddsa_raw="$(trim "${KEY_EDDSA_IN:-}")"
 
   local meta_key_size=""
   local meta_key_curve=""

@@ -238,40 +238,23 @@ EXT_SECTION="${EXT_SECTION:-server_cert}"
 QUIET_OPENSSL="${QUIET_OPENSSL:-1}"
 
 # ---- Resolve intermediate dir ----
-# Logique:
-# - Si ACTION est défini, require_int_dir_for_action a peut-être fixé INT_DIR.
-# - On normalise INT_DIR si fourni nu (ex: "internet" → "intm-internet-ca").
-# - Sinon, si KIND est fourni → "intm-${KIND}-ca".
-# - Sinon, on exige INT_DIR explicite (pas de fallback silencieux).
-#
-# Règles de normalisation :
-#   "."            → reste "."
-#   contient "/"   → garder tel quel (chemin)
-#   ^intm-.*-ca$   → garder tel quel (déjà normalisé)
-#   sinon          → "intm-${INT_DIR}-ca"
-
-_raw_int="${INT_DIR:-}"
-_kind="${KIND:-}"
-
-normalize_int_dir() {
-  local v="$1"
-  if [[ "$v" == "." ]]; then
-    printf "%s" "."
-  elif [[ "$v" == */* ]]; then
-    printf "%s" "$v"
-  elif [[ "$v" =~ ^intm-.*-ca$ ]]; then
-    printf "%s" "$v"
-  else
-    printf "intm-%s-ca" "$v"
-  fi
-}
-
-if [[ -n "$_raw_int" ]]; then
-  INT_DIR="$(normalize_int_dir "$_raw_int")"
-elif [[ -n "$_kind" ]]; then
-  INT_DIR="intm-${_kind}-ca"
-else
+# Si ACTION est défini, require_int_dir_for_action a déjà résolu/validé.
+# Sinon, on retombe sur la même logique partagée que le reste du toolkit.
+if [[ -z "${INT_DIR:-}" && -z "${KIND:-}" ]]; then
   die "INT_DIR manquant (ou fournis ACTION/KIND pour résolution) ; ex: INT_DIR=intm-web-ca ou INT_DIR=internet"
+fi
+
+if [[ -z "${ACTION:-}" ]]; then
+  if [[ -n "${INT_DIR:-}" ]]; then
+    INT_DIR="$(normalize_int_dir "$INT_DIR")"
+    ensure_safe_int_dir "$INT_DIR"
+    if [[ -z "${KIND:-}" ]]; then
+      KIND="$(kind_from_int_dir "$INT_DIR")"
+    fi
+  else
+    INT_DIR="intm-${KIND}-ca"
+    ensure_safe_int_dir "$INT_DIR"
+  fi
 fi
 
 info "Using intermediate directory: ${INT_DIR}"
