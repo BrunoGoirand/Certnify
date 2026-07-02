@@ -149,33 +149,21 @@ INTM_REVOKED="${INTM_REVOKED:-0}"  # manual override (optional)
 
 # ---------------------------
 # Resolve target intermediate directory (INT_DIR wins over KIND)
-# Rules:
-# - If INT_DIR contains a '/', keep as-is (treat as path).
-# - If INT_DIR already matches "intm-*-ca", keep as-is.
-# - If INT_DIR == ".", keep as-is (current dir).
-# - Else, when INT_DIR is set (bare name), expand to "intm-${INT_DIR}-ca".
-# - Else, fallback to KIND → "intm-${KIND}-ca", then "intermediate".
+# Keep this aligned with the shared helpers also used by gen-leaf.
 # ---------------------------
-raw_int="${INT_DIR:-}"
-kind="${KIND:-}"
-
-if [[ -n "$raw_int" ]]; then
-  if [[ "$raw_int" == "." ]]; then
-    INT_DIR="."
-  elif [[ "$raw_int" == */* ]]; then
-    INT_DIR="$raw_int"
-  elif [[ "$raw_int" =~ ^intm-.*-ca$ ]]; then
-    INT_DIR="$raw_int"
-  else
-    INT_DIR="intm-${raw_int}-ca"
+if [[ -n "${INT_DIR:-}" ]]; then
+  INT_DIR="$(normalize_int_dir "$INT_DIR")"
+  ensure_safe_int_dir "$INT_DIR"
+  if [[ -z "${KIND:-}" ]]; then
+    KIND="$(kind_from_int_dir "$INT_DIR")"
   fi
-elif [[ -n "$kind" ]]; then
-  INT_DIR="intm-${kind}-ca"
+elif [[ -n "${KIND:-}" ]]; then
+  INT_DIR="intm-${KIND}-ca"
+  ensure_safe_int_dir "$INT_DIR"
 else
   INT_DIR="intermediate"
+  ensure_safe_int_dir "$INT_DIR"
 fi
-
-ensure_safe_int_dir "$INT_DIR"
 
 info "Using intermediate directory: ${INT_DIR}"
 export CA_DIR="$INT_DIR"
@@ -436,7 +424,7 @@ info "Intermediate CA certificate ready: $CANON_CERT"
 cat "$CANON_CERT" "$ROOT_DIR/root/certs/ca.cert.pem" > "$CANON_CHAIN"
 chmod 444 "$CANON_CHAIN"
 info "Chain ready: $CANON_CHAIN"
-#ensure_serial_monotonic "$INT_DIR"
+ensure_serial_monotonic "$INT_DIR"
 
 # Optional: also archive the new version suffixed by its serial (traceability)
 if [[ -n "$SERIAL_HEX_ACTUAL" ]]; then

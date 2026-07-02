@@ -101,6 +101,15 @@ set -euo pipefail
 # shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
 
+REQ_CNF_TMP=""
+REQ_CNF_DN=""
+cleanup() {
+  [[ -n "$REQ_CNF_TMP" ]] && rm -f "$REQ_CNF_TMP"
+  [[ -n "$REQ_CNF_DN"  ]] && rm -f "$REQ_CNF_DN"
+  release_locks
+}
+trap cleanup EXIT
+
 # --- Action-aware mode (server|user|dev|email|doc) ---
 # Priorité à ACTION; TYPE reste supporté pour compat (TYPE=server → ACTION=server)
 ACTION="${ACTION:-${TYPE:-}}"
@@ -268,6 +277,8 @@ C="$(validate_country_iso "$C")"
 
 # ---- Paths & layout ----
 cd "$ROOT_DIR"
+int_lock_name="$(printf '%s' "$INT_DIR" | tr '/ ' '__')"
+acquire_lock "intm-${int_lock_name}"
 ensure_intermediate_layout "$INT_DIR"
 
 # Always force INT_CNF to match INT_DIR
@@ -446,7 +457,6 @@ fi
 # ---- Build a transient req config with DN and SAN ----
 REQ_CNF_TMP="$(mktemp)"
 REQ_CNF_DN="$(mktemp)"
-trap 'rm -f "$REQ_CNF_TMP" "$REQ_CNF_DN"' EXIT
 
 # 1) Start from intermediate CNF (must contain req/req_distinguished_name and placeholders)
 cp "$INT_CNF" "$REQ_CNF_TMP"
@@ -530,7 +540,7 @@ else
 fi
 
 # ---- Make sure next serial won't collide with index.txt ----
-#ensure_serial_monotonic "$INT_DIR"
+ensure_serial_monotonic "$INT_DIR"
 
 # Trace & garde-fou : montrer le next serial et refuser s'il est absurde
 _next_hex="$(tr -d '\r\n' < "$INT_DIR/serial" | tr '[:lower:]' '[:upper:]')"

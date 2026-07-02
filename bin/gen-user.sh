@@ -13,6 +13,8 @@ source "${SCRIPT_DIR}/pki-env.sh"
 : "${CN:?Common Name (CN) required}"
 
 # Une seule chose à dire: ACTION=user – gen-leaf fait tout le reste.
+# PROFILE reste accepté pour compat, mais gen-leaf consomme EXT_SECTION.
 env ACTION="user" CN="${CN}" \
-  SAN="${SAN:-}" DAYS="${DAYS:-825}" PROFILE="${PROFILE:-client_cert}" \
+  SAN="${SAN:-}" DAYS="${DAYS:-825}" \
+  PROFILE="${PROFILE:-client_cert}" EXT_SECTION="${EXT_SECTION:-${PROFILE:-client_cert}}" \
   "${SCRIPT_DIR}/gen-leaf.sh"

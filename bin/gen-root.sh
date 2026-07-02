@@ -100,6 +100,13 @@ set -euo pipefail
 # shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
 
+REQ_CNF=""
+cleanup() {
+  [[ -n "$REQ_CNF" ]] && rm -f "$REQ_CNF"
+  release_locks
+}
+trap cleanup EXIT
+
 # ============================================
 #  Root CA generator (hardened)
 #  - Refuse overwrite if existing DN (RFC2253) differs
@@ -144,6 +151,7 @@ C="$(validate_country_iso "$C")"
 
 # ---- Layout & CNF ----
 cd "$ROOT_DIR"
+acquire_lock "root-ca"
 ensure_root_layout "root"
 
 ROOT_ABS="$(pwd)/root"
@@ -203,7 +211,6 @@ fi
 
 # ---- Build temporary req.cnf with injected DN ----
 REQ_CNF="$(mktemp)"
-trap 'rm -f "$REQ_CNF"' EXIT
 render_req_cnf_with_dn "$ROOT_CNF" "$REQ_CNF" "$C" "$O" "$OU" "$CN"
 
 # ---- Self-sign root certificate if missing ----
