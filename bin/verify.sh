@@ -133,6 +133,8 @@ elif echo "$verify_out" | grep -qi "certificate revoked"; then
   status="REVOKED"
 fi
 
+info "VERIFY STATUS: ${status}"
+
 # ---------------------------
 # Extensions (informative)
 # ---------------------------

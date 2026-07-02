@@ -63,6 +63,7 @@
 #     - ou : make show-intermediate-serial KIND=web
 #   make crl-root-revoked INT_DIR=intm-web-ca
 #     - ou : make crl-root-revoked KIND=web
+#   make test-smoke
 #
 # Variables utiles
 #   CN        : Common Name (ex. app.example.com, john@example.com, etc.)
@@ -103,6 +104,7 @@ help:
 	@echo '  -- Vérification & Révocation:'
 	@echo '  make verify FILE=".../cert.crt" [CHAIN=".../chain.cert.pem"] [VERIFY_CRL=0|1] [VERIFY_MODE=normal|tolerate_revoked|info]'
 	@echo '  make revoke FILE=".../cert.crt" (ou variables acceptées par revoke-leaf.sh)'
+	@echo '  make test-smoke'
 	@echo ''
 
 # --- Defaults ---
@@ -229,7 +231,7 @@ user:   PROFILE ?= client_cert
 
 dev:    KIND ?= $(DEFAULT_KIND_dev)
 dev:    INT_DIR ?= intm-$(KIND)-ca
-dev:    DAYS ?= 1095
+dev:    DAYS ?= 730
 dev:    PROFILE ?= code_sign
 
 email:  KIND ?= $(DEFAULT_KIND_email)
@@ -399,7 +401,7 @@ verify-intermediate-revoked:
 	$(OPENSSL) verify -CAfile "$$ROOT_CA" -crl_check -CRLfile "$$ROOT_CRL" "$$INT_CERT"
 
 # --- Qualité de vie ---
-.PHONY: ls-web ls-auth ls-code ls-smime ls-archive
+.PHONY: ls-web ls-auth ls-code ls-smime ls-archive test-smoke
 ls-web:
 	@ls -l intm-web-ca/certs || true
 
@@ -414,6 +416,9 @@ ls-smime:
 
 ls-archive:
 	@ls -l intm-archive-ca/certs || true
+
+test-smoke:
+	test/smoke.sh
 
 # ========= Divers =========
 tree:

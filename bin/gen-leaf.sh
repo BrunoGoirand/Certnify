@@ -92,7 +92,7 @@
 #  ── Examples ──────────────────────────────────────────────────
 #  make server CN="app.example.com" KIND="web"
 #  make user   CN="user@example.com" KIND="auth"
-#  make code   CN="signer" KIND="code" SAN_URI="urn:signer:1234"
+#  make dev    CN="signer" KIND="code" SAN_URI="urn:signer:1234"
 #  make email  CN="contact@example.com" KIND="smime"
 #  make doc    CN="archive-2025" KIND="archive"
 #

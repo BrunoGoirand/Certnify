@@ -111,7 +111,7 @@ CN="${CN:-Example Intermediate CA}"
 C="${C:-}"
 O="${O:-}"
 OU="${OU:-}"
-DAYS="${DAYS:-1825}"                   # 5 years minimum for an intermediate
+DAYS="${DAYS:-3650}"                   # 10 years by default for an intermediate
 
 #KEY_ALG="${KEY_ALG:-RSA}"
 #KEY_SIZE="${KEY_SIZE:-4096}"

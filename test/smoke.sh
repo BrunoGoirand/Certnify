@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+OPENSSL="${OPENSSL:-openssl}"
+TMPDIR_ROOT="${TMPDIR_ROOT:-${TMPDIR:-/private/tmp}}"
+
+die() { echo "[ERR] $*" >&2; exit 1; }
+info() { echo "[OK ] $*"; }
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
+}
+
+assert_file() {
+  local path="$1"
+  [[ -f "$path" ]] || die "Missing file: $path"
+}
+
+assert_contains() {
+  local haystack="$1" needle="$2" label="$3"
+  grep -Fq "$needle" <<<"$haystack" || die "Expected '$needle' in $label"
+}
+
+assert_cert_text_contains() {
+  local cert="$1" needle="$2" label="$3"
+  local text
+  text="$("$OPENSSL" x509 -in "$cert" -noout -text 2>/dev/null)" || die "Unable to read certificate: $cert"
+  assert_contains "$text" "$needle" "$label"
+}
+
+require_cmd "$OPENSSL"
+require_cmd tar
+require_cmd mktemp
+require_cmd make
+
+WORKDIR="$(mktemp -d "$TMPDIR_ROOT/certnify-smoke.XXXXXX")"
+trap 'rm -rf "$WORKDIR"' EXIT
+
+info "Workspace: $WORKDIR"
+
+tar \
+  --exclude=.git \
+  --exclude=.DS_Store \
+  --exclude=root \
+  --exclude='intm-*' \
+  --exclude=draft \
+  --exclude=plan \
+  --exclude=test-results \
+  -cf - -C "$ROOT_DIR" . | tar -xf - -C "$WORKDIR"
+
+cd "$WORKDIR"
+
+run_make() {
+  info "make $*"
+  make "$@" >/dev/null
+}
+
+run_make root CN="Smoke Root CA"
+run_make int-web CN="Smoke Web CA"
+run_make int-auth CN="Smoke Auth CA"
+run_make int-code CN="Smoke Code CA"
+run_make int-smime CN="Smoke S/MIME CA"
+run_make int-archive CN="Smoke Archive CA"
+
+run_make server CN="app.example.test"
+run_make user CN="john@example.test"
+run_make code CN="Smoke Signing Key"
+run_make email CN="john@example.test"
+run_make archive CN="Smoke Archive Seal"
+
+assert_file "root/certs/ca.cert.pem"
+assert_file "intm-web-ca/certs/app.example.test.cert.pem"
+assert_file "intm-auth-ca/certs/john@example.test.cert.pem"
+assert_file "intm-code-ca/certs/Smoke Signing Key.cert.pem"
+assert_file "intm-smime-ca/certs/john@example.test.cert.pem"
+assert_file "intm-archive-ca/certs/Smoke Archive Seal.cert.pem"
+
+assert_cert_text_contains "intm-web-ca/certs/app.example.test.cert.pem" "TLS Web Server Authentication" "server EKU"
+assert_cert_text_contains "intm-auth-ca/certs/john@example.test.cert.pem" "TLS Web Client Authentication" "user EKU"
+assert_cert_text_contains "intm-code-ca/certs/Smoke Signing Key.cert.pem" "Code Signing" "code EKU"
+assert_cert_text_contains "intm-smime-ca/certs/john@example.test.cert.pem" "E-mail Protection" "email EKU"
+assert_cert_text_contains "intm-auth-ca/certs/john@example.test.cert.pem" "email:john@example.test" "user SAN"
+assert_cert_text_contains "intm-smime-ca/certs/john@example.test.cert.pem" "email:john@example.test" "email SAN"
+assert_cert_text_contains "intm-archive-ca/certs/Smoke Archive Seal.cert.pem" "CA:FALSE" "archive basic constraints"
+
+verify_output="$(make verify KIND=web CN="app.example.test" 2>&1)" || die "make verify failed"
+assert_contains "$verify_output" "VERIFY STATUS: OK" "verify output"
+
+dup_output="$(make server CN="app.example.test" 2>&1 || true)"
+assert_contains "$dup_output" "Refusing to issue: active certificate(s) for CN='app.example.test' already exist" "duplicate CN refusal"
+
+run_make revoke KIND=web CN="app.example.test" REASON="cessationOfOperation"
+verify_revoked="$(make verify KIND=web CN="app.example.test" VERIFY_CRL=1 VERIFY_MODE=info 2>&1)" || die "verify revoked failed"
+assert_contains "$verify_revoked" "VERIFY STATUS: REVOKED" "revoked verify output"
+
+run_make crl-root
+revoked_int_output="$(make verify-intermediate-revoked KIND=web 2>&1 || true)"
+assert_contains "$revoked_int_output" "OK" "verify-intermediate-revoked command wiring"
+
+rollback_preview="$(make -n rollback-web)"
+assert_contains "$rollback_preview" "bin/intm-rollback-to-legacy.sh" "rollback recipe"
+
+info "Smoke test passed"
