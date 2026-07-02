@@ -94,6 +94,13 @@
 set -euo pipefail
 source "$(dirname "$0")/pki-env.sh"
 
+REQ_CNF=""
+cleanup() {
+  [[ -n "$REQ_CNF" ]] && rm -f "$REQ_CNF"
+  release_locks
+}
+trap cleanup EXIT
+
 # ---------------------------
 # Debug
 # ---------------------------
@@ -166,6 +173,8 @@ else
   INT_DIR="intermediate"
 fi
 
+ensure_safe_int_dir "$INT_DIR"
+
 info "Using intermediate directory: ${INT_DIR}"
 export CA_DIR="$INT_DIR"
 
@@ -181,6 +190,9 @@ C="$(validate_country_iso "$C")"
 # Layout (root must already exist)
 # ---------------------------
 cd "$ROOT_DIR"
+acquire_lock "root-ca"
+int_lock_name="$(printf '%s' "$INT_DIR" | tr '/ ' '__')"
+acquire_lock "intm-${int_lock_name}"
 ensure_root_layout "root"
 mkdir -p "$INT_DIR"
 ensure_intermediate_layout "$INT_DIR"
@@ -209,22 +221,17 @@ CANON_CHAIN="$INT_DIR/certs/ca.chain.cert.pem"
 KEY_PATH="$INT_DIR/private/ca.key.pem"
 needs_rekey=0
 
-# --- Early-exit if an identical, still-valid intermediate already exists ---
+# --- Determine whether issuance can be skipped safely ---
 : "${REISSUE_IF_EXPIRES_BEFORE:=2592000}"  # 30 days
 : "${FORCE_REISSUE:=0}"
 : "${ROTATE_KEY:=0}"
 
 WANT_DN="$(canonical_dn_rfc2253)"  # uses CN/OU/O/C already normalized above
 
-if [[ -f "$CANON_CERT" && -f "$KEY_PATH" && "$FORCE_REISSUE" != "1" && "$ROTATE_KEY" != "1" ]]; then
+skip_reissue=0
+HAVE_DN=""
+if [[ -f "$CANON_CERT" ]]; then
   HAVE_DN="$("$OPENSSL" x509 -in "$CANON_CERT" -noout -subject -nameopt RFC2253 2>/dev/null | sed 's/^subject=//')"
-  # Still valid beyond the threshold?
-  if "$OPENSSL" x509 -checkend "$REISSUE_IF_EXPIRES_BEFORE" -in "$CANON_CERT" -noout >/dev/null 2>&1; then
-    if [[ "$HAVE_DN" == "$WANT_DN" ]]; then
-      info "Intermediate already exists and is still valid (DN='${HAVE_DN}') — skip. Set FORCE_REISSUE=1 or ROTATE_KEY=1 to reissue."
-      exit 0
-    fi
-  fi
 fi
 
 # Auto-detect if the previous canonical intermediate cert is revoked in ROOT
@@ -243,6 +250,7 @@ if [[ -s "$KEY_PATH" ]]; then
   existing_alg=""
   existing_size=""
   existing_curve=""
+  existing_eddsa=""
 
   if "$OPENSSL" rsa -in "$KEY_PATH" -noout >/dev/null 2>&1; then
     existing_alg="RSA"
@@ -263,7 +271,7 @@ if [[ -s "$KEY_PATH" ]]; then
   want_curve="$KEY_CURVE"
 
   dbg "Existing key: alg='${existing_alg}', size='${existing_size}', curve='${existing_curve}'"
-  dbg "Requested key: alg='${want_alg}', size='${want_size}', curve='${want_curve}'"
+  dbg "Requested key: alg='${want_alg}', size='${want_size}', curve='${want_curve}', eddsa='${KEY_EDDSA}'"
 
   if [[ "$REKEY_ON_ALG_CHANGE" == "1" ]]; then
     case "$want_alg" in
@@ -278,7 +286,9 @@ if [[ -s "$KEY_PATH" ]]; then
         fi
         ;;
       EDDSA|ED25519|ED448)
-        if [[ "$existing_alg" != "EdDSA" ]]; then needs_rekey=1; fi
+        if [[ "$existing_alg" != "EdDSA" || ( -n "$existing_eddsa" && "$existing_eddsa" != "$KEY_EDDSA" ) ]]; then
+          needs_rekey=1
+        fi
         ;;
       *)
         warn "Unknown KEY_ALG='$want_alg' — forcing rekey."
@@ -304,6 +314,21 @@ if [[ -s "$KEY_PATH" ]]; then
   fi
 fi
 
+if [[ -f "$CANON_CERT" && -f "$KEY_PATH" && "$FORCE_REISSUE" != "1" && "$ROTATE_KEY" != "1" ]]; then
+  if "$OPENSSL" x509 -checkend "$REISSUE_IF_EXPIRES_BEFORE" -in "$CANON_CERT" -noout >/dev/null 2>&1 \
+    && [[ "$HAVE_DN" == "$WANT_DN" ]] \
+    && [[ "$intm_revoked_auto" != "1" ]] \
+    && [[ "$INTM_REVOKED" != "1" ]] \
+    && [[ "$needs_rekey" != "1" ]]; then
+    skip_reissue=1
+  fi
+fi
+
+if [[ "$skip_reissue" == "1" ]]; then
+  info "Intermediate already exists and is still valid (DN='${HAVE_DN}') — skip. Set FORCE_REISSUE=1 or ROTATE_KEY=1 to reissue."
+  exit 0
+fi
+
 if [[ ! -s "$KEY_PATH" ]]; then
   gen_private_key "$KEY_ALG" "$KEY_SIZE" "$KEY_CURVE" "$KEY_PATH"
 else
@@ -314,7 +339,6 @@ fi
 # Render a request config (DN injected; drop empty lines)
 # ---------------------------
 REQ_CNF="$(mktemp)"
-trap 'rm -f "$REQ_CNF"' EXIT
 render_req_cnf_with_dn "$INT_CNF" "$REQ_CNF" "$C" "$O" "$OU" "$CN"
 
 # ---------------------------
@@ -482,8 +506,7 @@ else
   die  "Vérification de chaîne échouée pour l’intermédiaire ($INT_CRT)"
 fi
 
-# (optionnel) Construire/rafraîchir la chaîne pour distribution
+# Legacy alias for older tooling: point to the canonical chain.
 CHAIN_PATH="$DIR/certs/chain.cert.pem"
-cat "$INT_CRT" "$ROOT_CRT" > "$CHAIN_PATH"
-chmod 644 "$CHAIN_PATH"
-info "Chaîne écrite: $CHAIN_PATH (intm + root)"
+ln -sfn "ca.chain.cert.pem" "$CHAIN_PATH"
+info "Legacy chain alias refreshed: $CHAIN_PATH -> ca.chain.cert.pem"

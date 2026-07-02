@@ -23,6 +23,63 @@ die(){ echo "[ERR] $*" >&2; exit 1; }
 info(){ echo "[OK ] $*"; }
 warn(){ echo "[!! ] $*" >&2; }
 
+# ---- Portable lock helpers (mkdir-based, works on macOS/Bash 3.2) ----
+LOCK_TIMEOUT="${LOCK_TIMEOUT:-30}"
+declare -a __CERTNIFY_LOCK_DIRS=()
+
+acquire_lock() {
+  local lock_name="$1"
+  local timeout="${2:-$LOCK_TIMEOUT}"
+  local lock_root="$ROOT_DIR/.locks"
+  local lock_dir="${lock_root}/${lock_name}.lock"
+  local waited=0
+
+  mkdir -p "$lock_root"
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    (( waited >= timeout )) && die "Timeout while waiting for lock: $lock_name"
+    sleep 1
+    waited=$((waited + 1))
+  done
+
+  printf '%s\n' "$$" > "${lock_dir}/pid"
+  __CERTNIFY_LOCK_DIRS+=("$lock_dir")
+}
+
+release_locks() {
+  local lock_dir
+  local idx
+
+  for (( idx=${#__CERTNIFY_LOCK_DIRS[@]}-1; idx>=0; idx-- )); do
+    lock_dir="${__CERTNIFY_LOCK_DIRS[$idx]}"
+    [[ -n "$lock_dir" && -d "$lock_dir" ]] && rm -rf "$lock_dir"
+  done
+  __CERTNIFY_LOCK_DIRS=()
+}
+
+ensure_safe_int_dir() {
+  local raw="${1:-}"
+
+  [[ -n "$raw" ]] || die "INT_DIR must not be empty"
+  [[ "$raw" != "/" ]] || die "INT_DIR '/' is forbidden"
+
+  if [[ "$raw" == .* && "$raw" != "." && "$raw" != ./* ]]; then
+    die "INT_DIR must stay within the workspace: '$raw'"
+  fi
+
+  if [[ "$raw" == /* ]]; then
+    case "$raw" in
+      "$ROOT_DIR"/*) ;;
+      *) die "Absolute INT_DIR outside workspace is forbidden: '$raw'" ;;
+    esac
+  fi
+
+  case "/$raw/" in
+    */../*|*/./../*|*/.././*|*/../../*)
+      die "INT_DIR must not contain '..': '$raw'"
+      ;;
+  esac
+}
+
 # ---- OpenSSL presence + version (refuse LibreSSL) ----
 require_openssl(){
   command -v "$OPENSSL" >/dev/null 2>&1 || die "openssl not found in PATH"

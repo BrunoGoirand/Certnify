@@ -17,6 +17,14 @@ assert_file() {
   [[ -f "$path" ]] || die "Missing file: $path"
 }
 
+assert_symlink_target() {
+  local path="$1" expected="$2"
+  [[ -L "$path" ]] || die "Expected symlink: $path"
+  local target
+  target="$(readlink "$path")" || die "Unable to read symlink: $path"
+  [[ "$target" == "$expected" ]] || die "Unexpected symlink target for $path: '$target' != '$expected'"
+}
+
 assert_contains() {
   local haystack="$1" needle="$2" label="$3"
   grep -Fq "$needle" <<<"$haystack" || die "Expected '$needle' in $label"
@@ -103,6 +111,7 @@ assert_file "intm-auth-ca/certs/john@example.test.cert.pem"
 assert_file "intm-code-ca/certs/Smoke Signing Key.cert.pem"
 assert_file "intm-smime-ca/certs/john@example.test.cert.pem"
 assert_file "intm-archive-ca/certs/Smoke Archive Seal.cert.pem"
+assert_symlink_target "intm-web-ca/certs/chain.cert.pem" "ca.chain.cert.pem"
 
 assert_cert_text_contains "intm-web-ca/certs/app.example.test.cert.pem" "TLS Web Server Authentication" "server EKU"
 assert_cert_text_contains "intm-auth-ca/certs/john@example.test.cert.pem" "TLS Web Client Authentication" "user EKU"
@@ -159,6 +168,43 @@ clone_workspace "$CUSTOM_CNF_CASE"
   cd "$CUSTOM_CNF_CASE"
   run_make root CN="Custom CNF Root" ROOT_CNF="custom/root.cnf"
   assert_file "custom/root.cnf"
+)
+
+INTM_REKEY_CASE="$(mktemp -d "$TMPDIR_ROOT/certnify-intm-rekey.XXXXXX")"
+clone_workspace "$INTM_REKEY_CASE"
+(
+  cd "$INTM_REKEY_CASE"
+  run_make root CN="Rekey Root"
+  run_make int-web CN="Rekey Web CA" KEY_ALG="RSA" KEY_SIZE="4096"
+  serial_before="$("$OPENSSL" x509 -in intm-web-ca/certs/ca.cert.pem -noout -serial | sed 's/^serial=//I')"
+  run_make int-web CN="Rekey Web CA" KEY_ALG="EC" KEY_CURVE="secp384r1"
+  serial_after="$("$OPENSSL" x509 -in intm-web-ca/certs/ca.cert.pem -noout -serial | sed 's/^serial=//I')"
+  [[ "$serial_before" != "$serial_after" ]] || die "Intermediate serial did not change after requested key algorithm change"
+  rekey_meta="$(cat intm-web-ca/ca.meta)"
+  assert_contains "$rekey_meta" "ALG=EC" "intermediate metadata effective alg after rekey"
+  assert_contains "$rekey_meta" "KEY_CURVE=secp384r1" "intermediate metadata effective curve after rekey"
+)
+
+INTM_REVOKE_CASE="$(mktemp -d "$TMPDIR_ROOT/certnify-intm-revoke.XXXXXX")"
+clone_workspace "$INTM_REVOKE_CASE"
+(
+  cd "$INTM_REVOKE_CASE"
+  run_make root CN="Revoked Root"
+  run_make int-web CN="Revoked Web CA"
+  serial_before="$("$OPENSSL" x509 -in intm-web-ca/certs/ca.cert.pem -noout -serial | sed 's/^serial=//I')"
+  run_make revoke-intermediate KIND="web" REASON="keyCompromise"
+  run_make int-web CN="Revoked Web CA"
+  serial_after="$("$OPENSSL" x509 -in intm-web-ca/certs/ca.cert.pem -noout -serial | sed 's/^serial=//I')"
+  [[ "$serial_before" != "$serial_after" ]] || die "Intermediate serial did not change after revoked intermediate reissue"
+)
+
+INTM_PATH_CASE="$(mktemp -d "$TMPDIR_ROOT/certnify-intm-path.XXXXXX")"
+clone_workspace "$INTM_PATH_CASE"
+(
+  cd "$INTM_PATH_CASE"
+  run_make root CN="Path Root"
+  invalid_path_output="$(make intermediate INT_DIR="../escape" CN="Escape CA" 2>&1 || true)"
+  assert_contains "$invalid_path_output" "INT_DIR must stay within the workspace" "unsafe INT_DIR rejection"
 )
 
 info "Smoke test passed"
