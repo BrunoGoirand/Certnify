@@ -5,6 +5,7 @@
 # Part of the Certnify PKI Toolkit — https://github.com/brunogoirand/certnify
 #
 set -euo pipefail
+# shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
 
 # ------------------------------------------------------------------
@@ -29,15 +30,16 @@ source "$(dirname "$0")/pki-env.sh"
 newest_tsv_for_kind() {
   local k="$1"
   local c
+  local matches=()
   shopt -s nullglob
-  for c in $(ls -1t out/"${k}"-leafs-*.tsv 2>/dev/null); do
+  matches=(out/"${k}"-leafs-*.tsv)
+  shopt -u nullglob
+  while IFS= read -r c; do
     if [[ -s "$c" ]]; then
-      echo "$c"
-      shopt -u nullglob
+      printf '%s\n' "$c"
       return 0
     fi
-  done
-  shopt -u nullglob
+  done < <(printf '%s\n' "${matches[@]}" | sort -r)
   printf ''
 }
 
@@ -66,10 +68,10 @@ shopt -s nullglob
 legcands=(intm-"${KIND}"-ca-legacy-*)
 shopt -u nullglob
 if (( ${#legcands[@]} )); then
-  latest_legacy="$(ls -1d intm-"${KIND}"-ca-legacy-* 2>/dev/null | sort -r | head -n1 || true)"
+  latest_legacy="$(printf '%s\n' "${legcands[@]}" | sort -r | head -n1 || true)"
   if [[ -n "$latest_legacy" ]]; then
     # extrait tout après "-legacy-"
-    latest_ts="${latest_legacy#intm-${KIND}-ca-legacy-}"
+    latest_ts="${latest_legacy#intm-"${KIND}"-ca-legacy-}"
   fi
 fi
 
@@ -123,7 +125,10 @@ if [[ -z "${LEGACY_DIR:-}" ]]; then
   if [[ -n "$latest_ts" && -d "intm-${KIND}-ca-legacy-${latest_ts}" ]]; then
     LEGACY_DIR="intm-${KIND}-ca-legacy-${latest_ts}"
   else
-    LEGACY_DIR="$(ls -1d intm-"${KIND}"-ca-legacy-* 2>/dev/null | sort -r | head -n1 || true)"
+    shopt -s nullglob
+    legcands=(intm-"${KIND}"-ca-legacy-*)
+    shopt -u nullglob
+    LEGACY_DIR="$(printf '%s\n' "${legcands[@]}" | sort -r | head -n1 || true)"
     [[ -n "$LEGACY_DIR" ]] || LEGACY_DIR=""
   fi
 fi

@@ -5,6 +5,7 @@
 # Part of the Certnify PKI Toolkit — https://github.com/brunogoirand/certnify
 #
 set -euo pipefail
+# shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
 
 # ============================================================

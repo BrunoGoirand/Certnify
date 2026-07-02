@@ -98,6 +98,7 @@
 #
 # ---------------------------------------------------------------
 set -euo pipefail
+# shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
 
 # --- Action-aware mode (server|user|dev|email|doc) ---

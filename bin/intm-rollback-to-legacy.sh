@@ -5,6 +5,7 @@
 # Part of the Certnify PKI Toolkit — https://github.com/brunogoirand/certnify
 #
 set -euo pipefail
+# shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
 
 # ------------------------------------------------------------
@@ -27,7 +28,10 @@ KIND="${KIND:-}"
 if [[ -z "$LEGACY_DIR" ]]; then
   [[ -n "$KIND" ]] || die "Spécifie KIND=web|auth|code|smime|archive (ou LEGACY_DIR=...)."
   # Trouve le legacy le plus récent
-  latest_legacy="$(ls -1d "intm-${KIND}-ca-legacy-"* 2>/dev/null | sort -r | head -n1 || true)"
+  shopt -s nullglob
+  legacy_dirs=("intm-${KIND}-ca-legacy-"*)
+  shopt -u nullglob
+  latest_legacy="$(printf '%s\n' "${legacy_dirs[@]}" | sort -r | head -n1 || true)"
   [[ -n "$latest_legacy" ]] || die "Aucun legacy trouvé pour KIND='${KIND}'."
   LEGACY_DIR="$latest_legacy"
 else

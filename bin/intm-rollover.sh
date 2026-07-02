@@ -5,6 +5,7 @@
 # Part of the Certnify PKI Toolkit — https://github.com/brunogoirand/certnify
 #
 set -euo pipefail
+# shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
 
 # ------------------------------------------------------------
@@ -20,8 +21,6 @@ source "$(dirname "$0")/pki-env.sh"
 : "${KEY_EDDSA:=Ed25519}"
 : "${QUIET_OPENSSL:=1}"
 
-quiet="${QUIET_OPENSSL}"   # pour tout code qui lirait 'quiet' (compat)
-
 [[ -n "${KIND:-}"   ]] || die "Spécifie KIND=web|auth|code|smime|archive"
 [[ -n "${INT_CN:-}" ]] || die "Spécifie INT_CN='Nom de l\\'intermédiaire'"
 
@@ -29,11 +28,6 @@ ROOT_CNF="root/openssl.cnf"
 ROOT_CERT="root/certs/ca.cert.pem"
 ROOT_KEY="root/private/ca.key.pem"
 [[ -f "$ROOT_CNF" && -f "$ROOT_CERT" && -f "$ROOT_KEY" ]] || die "Racine manquante (génère root/ d'abord)."
-
-# Runner silencieux selon QUIET_OPENSSL
-_run() {
-  if [[ "${QUIET_OPENSSL:-1}" == "1" ]]; then "$@" >/dev/null 2>&1; else "$@"; fi
-}
 
 # Nom de base et nom legacy unique
 BASE_DIR="intm-${KIND}-ca"

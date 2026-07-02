@@ -97,6 +97,7 @@
 #
 # ===============================================================
 set -euo pipefail
+# shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
 
 # ============================================

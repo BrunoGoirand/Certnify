@@ -6,6 +6,7 @@
 #
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bin/pki-env.sh
 source "${SCRIPT_DIR}/pki-env.sh"
 
 # CN requis (sinon gen-leaf le vérifiera plus loin au moment du DN)

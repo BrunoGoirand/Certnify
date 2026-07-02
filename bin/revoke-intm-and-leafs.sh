@@ -6,6 +6,7 @@
 #
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=bin/pki-env.sh
 source "${SCRIPT_DIR}/pki-env.sh"
 
 OPENSSL="${OPENSSL:-openssl}"
@@ -38,6 +39,7 @@ DEBUG="${DEBUG:-0}"
 # ---------------------------
 dbg(){ [[ "$DEBUG" == "1" ]] && echo "[DBG ] $*" >&2 || true; }
 if [[ "$DEBUG" == "1" ]]; then
+  rc=0
   set -o errtrace
   trap 'rc=$?; echo "[DBG ] ERR at ${BASH_SOURCE[0]}:${LINENO} → ${BASH_COMMAND} (rc=${rc})" >&2' ERR
 fi
@@ -94,7 +96,6 @@ INT_CNF="${ROOT_DIR}/${DIR}/openssl.cnf"
 ROOT_CRLPATH="${ROOT_DIR}/root/crl/ca.crl.pem"
 INT_CRLPATH="${ROOT_DIR}/${DIR}/crl/ca.crl.pem"
 
-ROOT_CERT="${ROOT_DIR}/root/certs/ca.cert.pem"
 INT_CERT="${ROOT_DIR}/${DIR}/certs/ca.cert.pem"
 INT_INDEX="${ROOT_DIR}/${DIR}/index.txt"
 ROOT_INDEX="${ROOT_DIR}/root/index.txt"
@@ -171,7 +172,7 @@ awk -v US="$(printf '\x1f')" 'BEGIN{FS="\t"}
     # Print exactly 6 fields separated by US (non-whitespace)
     printf "%s%s%s%s%s%s%s%s%s%s%s\n", status, US, expiry, US, rev, US, serial, US, filename, US, subject;
   }
-' "$INT_INDEX" | while IFS=$'\x1F' read -r status expiry revocation serial filename subject; do
+' "$INT_INDEX" | while IFS=$'\x1F' read -r status _expiry _revocation serial filename _subject; do
   # Filter by status (e.g., "V" or "V,E")
   if ! in_csv "$status" "$LEAF_STATUSES"; then
     continue

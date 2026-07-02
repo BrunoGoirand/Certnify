@@ -19,6 +19,7 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bin/pki-env.sh
 source "${SCRIPT_DIR}/pki-env.sh"
 
 # --- Defaults ---
@@ -29,6 +30,7 @@ OPENSSL="${OPENSSL:-openssl}"
 
 # --- Debug helpers ---
 if [[ "$DEBUG" == "1" ]]; then
+  rc=0
   set -x; set -o errtrace
   trap 'rc=$?; echo "[DBG ] ERR at ${BASH_SOURCE[0]}:${LINENO} → ${BASH_COMMAND} (rc=${rc})" >&2' ERR
 fi
@@ -65,7 +67,7 @@ CNF="openssl.cnf"; INDEX_LOCAL="index.txt"
 [[ -f "$INDEX_LOCAL" ]] || die "Missing $CA_DIR/$INDEX_LOCAL"
 
 # --- Resolve target (FILE > SERIAL > CN), sans variantes ---
-TARGET=""; resolved_serial=""
+TARGET=""
 dbg "Inputs: FILE='${FILE}', SERIAL='${SERIAL}', CN='${CN}'"
 
 # 1) FILE
@@ -78,11 +80,11 @@ fi
 if [[ -z "$TARGET" && -n "$SERIAL" ]]; then
   serial_uc="$(printf '%s' "$SERIAL" | tr '[:lower:]' '[:upper:]')"
   if [[ -f "newcerts/${serial_uc}.pem" ]]; then
-    TARGET="newcerts/${serial_uc}.pem"; resolved_serial="$serial_uc"
+    TARGET="newcerts/${serial_uc}.pem"
   else
     candidate="$(awk -F'\t' -v s="$serial_uc" '$4==s{print $5;exit}' "$INDEX_LOCAL" || true)"
     if [[ -n "$candidate" && "$candidate" != "unknown" && -f "$candidate" ]]; then
-      TARGET="$candidate"; resolved_serial="$serial_uc"
+      TARGET="$candidate"
     fi
   fi
 fi
@@ -92,7 +94,7 @@ if [[ -z "$TARGET" && -n "$CN" ]]; then
   # Préfère le DERNIER certificat VALIDE (statut V) pour ce CN depuis l'index
   serial_uc="$(awk -F'\t' -v pat="CN=${CN}" '$1=="V" && index($6, pat)>0 { s=$4 } END { if (s!="") print s }' "$INDEX_LOCAL" | tr '[:lower:]' '[:upper:]')"
   if [[ -n "$serial_uc" && -f "newcerts/${serial_uc}.pem" ]]; then
-    TARGET="newcerts/${serial_uc}.pem"; resolved_serial="$serial_uc"
+    TARGET="newcerts/${serial_uc}.pem"
   else
     # Fallback historique (peut pointer un ancien cert si non rafraîchi)
     TARGET="certs/${CN}.cert.pem"

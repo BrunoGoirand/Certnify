@@ -92,6 +92,7 @@
 #       REKEY_ON_ALG_CHANGE=1
 # ===============================================================
 set -euo pipefail
+# shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
 
 REQ_CNF=""
@@ -107,6 +108,7 @@ trap cleanup EXIT
 DEBUG="${DEBUG:-0}"
 dbg(){ [[ "$DEBUG" == "1" ]] && echo "[DBG ] $*" >&2 || true; }
 if [[ "$DEBUG" == "1" ]]; then
+  rc=0
   set -o errtrace
   trap 'rc=$?; echo "[DBG ] ERR at ${BASH_SOURCE[0]}:${LINENO} → ${BASH_COMMAND} (rc=${rc})" >&2' ERR
 fi

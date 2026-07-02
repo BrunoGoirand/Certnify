@@ -22,6 +22,7 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=bin/pki-env.sh
 source "${SCRIPT_DIR}/pki-env.sh"
 
 OPENSSL="${OPENSSL:-openssl}"
@@ -31,6 +32,7 @@ DEBUG="${DEBUG:-0}"
 # --- Debug helpers ---
 dbg(){ [[ "$DEBUG" == "1" ]] && echo "[DBG ] $*" >&2 || true; }
 if [[ "$DEBUG" == "1" ]]; then
+  rc=0
   set -o errtrace
   trap 'rc=$?; echo "[DBG ] ERR at ${BASH_SOURCE[0]}:${LINENO} → ${BASH_COMMAND} (rc=${rc})" >&2' ERR
 fi

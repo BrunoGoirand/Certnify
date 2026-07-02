@@ -5,6 +5,7 @@
 # Part of the Certnify PKI Toolkit — https://github.com/brunogoirand/certnify
 #
 set -euo pipefail
+# shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
 
 # ------------------------------------------------------------
@@ -32,7 +33,10 @@ if [[ -n "${INT_DIR:-}" ]]; then
 else
   [[ -n "${KIND:-}" ]] || die "Spécifie INT_DIR=... ou KIND=..."
   # Cherche le legacy le plus récent
-  latest_legacy="$(ls -1d "intm-${KIND}-ca-legacy-"* 2>/dev/null | sort -r | head -n1 || true)"
+  shopt -s nullglob
+  legacy_dirs=("intm-${KIND}-ca-legacy-"*)
+  shopt -u nullglob
+  latest_legacy="$(printf '%s\n' "${legacy_dirs[@]}" | sort -r | head -n1 || true)"
   if [[ -n "$latest_legacy" ]]; then
     INT_DIR="$latest_legacy"
     # extrait le timestamp après "-legacy-"
@@ -116,6 +120,10 @@ fi
 if [[ "$OUT" = "-" ]]; then
   : # rien à vérifier proprement
 else
-  grep -q . "$OUT" && info "Leafs listed OK." || warn "Aucune entrée sélectionnée (filtrage ? statut ?)."
+  if grep -q . "$OUT"; then
+    info "Leafs listed OK."
+  else
+    warn "Aucune entrée sélectionnée (filtrage ? statut ?)."
+  fi
 fi
 [[ -n "$ts" ]] && info "Rollover timestamp: $ts (legacy: intm-${KIND}-ca-legacy-$ts)"
