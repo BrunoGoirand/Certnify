@@ -64,7 +64,7 @@ For leaf issuance, the canonical commands are `make server`, `make user`, `make 
 Compatibility aliases `make code` and `make archive` remain available.
 Legacy section names such as `server_cert`, `client_cert`, `code_sign`, `smime`, and `archive` remain supported, with additional algorithm-specific profiles available for EC-based issuance.
 For `make email`, you can also select `SMIME_MODE=sign`, `SMIME_MODE=encrypt`, or keep the default combined legacy profile.
-For `make doc`, you can also select `ARCHIVE_MODE=seal` or `ARCHIVE_MODE=timestamp`, while keeping the default legacy archive profile.
+For `make doc` and `make archive`, you can also select `ARCHIVE_MODE=seal` or `ARCHIVE_MODE=timestamp`, while keeping the default legacy archive profile.
 
 ### 🌐 3. Issue a Server Certificate
 

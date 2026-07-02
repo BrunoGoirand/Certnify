@@ -300,8 +300,11 @@ Main extensions:
 Selection:
 
 - `make doc`: legacy `archive` profile
+- `make archive`: legacy `archive` profile
 - `make doc ARCHIVE_MODE=seal`: `archive_seal` profile
+- `make archive ARCHIVE_MODE=seal`: `archive_seal` profile
 - `make doc ARCHIVE_MODE=timestamp`: `timestamping` profile
+- `make archive ARCHIVE_MODE=timestamp`: `timestamping` profile
 
 ## SANs and Issuance Behavior
 

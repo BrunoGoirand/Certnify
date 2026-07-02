@@ -249,7 +249,6 @@ code:   PROFILE ?= code_sign
 archive: KIND ?= $(DEFAULT_KIND_doc)
 archive: INT_DIR ?= intm-$(KIND)-ca
 archive: DAYS ?= 3650
-archive: PROFILE ?= archive
 
 # Server certs (legacy SAN kept + SAN_* pour scripts modernes)
 server:
@@ -318,7 +317,7 @@ code:
 
 archive:
 	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	DAYS="$(DAYS)" PROFILE="$(or $(PROFILE),archive)" ARCHIVE_MODE="$(ARCHIVE_MODE)" \
+	DAYS="$(DAYS)" PROFILE="$(PROFILE)" ARCHIVE_MODE="$(ARCHIVE_MODE)" \
 	C="$(C)" O="$(O)" OU="$(OU)" \
 	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \

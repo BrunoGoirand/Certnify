@@ -300,8 +300,11 @@ Extensions principales :
 Sélection :
 
 - `make doc` : profil legacy `archive`
+- `make archive` : profil legacy `archive`
 - `make doc ARCHIVE_MODE=seal` : profil `archive_seal`
+- `make archive ARCHIVE_MODE=seal` : profil `archive_seal`
 - `make doc ARCHIVE_MODE=timestamp` : profil `timestamping`
+- `make archive ARCHIVE_MODE=timestamp` : profil `timestamping`
 
 ## SAN et comportement d'émission
 
