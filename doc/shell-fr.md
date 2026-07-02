@@ -2,6 +2,8 @@
 
 Ce document récapitule les scripts du répertoire `bin/`, leur rôle principal et leurs dépendances les plus visibles.
 
+Voir aussi `doc/profiles-fr.md` pour la référence des profils OpenSSL utilisés par ces scripts.
+
 ## Vue d'ensemble
 
 | Script | Description | Dépendances principales |

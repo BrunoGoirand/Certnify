@@ -223,12 +223,10 @@ endef
 server: KIND ?= $(DEFAULT_KIND_server)
 server: INT_DIR ?= intm-$(KIND)-ca
 server: DAYS ?= 397
-server: PROFILE ?= server_cert
 
 user:   KIND ?= $(DEFAULT_KIND_user)
 user:   INT_DIR ?= intm-$(KIND)-ca
 user:   DAYS ?= 825
-user:   PROFILE ?= client_cert
 
 dev:    KIND ?= $(DEFAULT_KIND_dev)
 dev:    INT_DIR ?= intm-$(KIND)-ca
@@ -238,12 +236,10 @@ dev:    PROFILE ?= code_sign
 email:  KIND ?= $(DEFAULT_KIND_email)
 email:  INT_DIR ?= intm-$(KIND)-ca
 email:  DAYS ?= 730
-email:  PROFILE ?= smime
 
 doc:    KIND ?= $(DEFAULT_KIND_doc)
 doc:    INT_DIR ?= intm-$(KIND)-ca
 doc:    DAYS ?= 3650
-doc:    PROFILE ?= archive
 
 code:   KIND ?= $(DEFAULT_KIND_dev)
 code:   INT_DIR ?= intm-$(KIND)-ca
@@ -258,7 +254,7 @@ archive: PROFILE ?= archive
 # Server certs (legacy SAN kept + SAN_* pour scripts modernes)
 server:
 	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	DAYS="$(DAYS)" PROFILE="$(or $(PROFILE),server_cert)" \
+	DAYS="$(DAYS)" PROFILE="$(PROFILE)" \
 	C="$(C)" O="$(O)" OU="$(OU)" \
 	SAN_DNS="$(or $(SAN_DNS),$(CN))" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
@@ -269,7 +265,7 @@ server:
 # User (client auth)
 user:
 	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	DAYS="$(DAYS)" PROFILE="$(or $(PROFILE),client_cert)" \
+	DAYS="$(DAYS)" PROFILE="$(PROFILE)" \
 	C="$(C)" O="$(O)" OU="$(OU)" \
 	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
@@ -291,7 +287,7 @@ dev:
 # S/MIME
 email:
 	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	DAYS="$(DAYS)" PROFILE="$(or $(PROFILE),smime)" \
+	DAYS="$(DAYS)" PROFILE="$(PROFILE)" SMIME_MODE="$(SMIME_MODE)" \
 	C="$(C)" O="$(O)" OU="$(OU)" \
 	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
@@ -302,7 +298,7 @@ email:
 # Archival / Time-stamp, etc.
 doc:
 	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	DAYS="$(DAYS)" PROFILE="$(or $(PROFILE),archive)" \
+	DAYS="$(DAYS)" PROFILE="$(PROFILE)" ARCHIVE_MODE="$(ARCHIVE_MODE)" \
 	C="$(C)" O="$(O)" OU="$(OU)" \
 	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
@@ -322,7 +318,7 @@ code:
 
 archive:
 	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	DAYS="$(DAYS)" PROFILE="$(or $(PROFILE),archive)" \
+	DAYS="$(DAYS)" PROFILE="$(or $(PROFILE),archive)" ARCHIVE_MODE="$(ARCHIVE_MODE)" \
 	C="$(C)" O="$(O)" OU="$(OU)" \
 	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \

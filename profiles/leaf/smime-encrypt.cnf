@@ -1,0 +1,6 @@
+[ smime_encrypt ]
+basicConstraints       = critical, CA:false
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage               = critical, keyEncipherment
+extendedKeyUsage       = emailProtection

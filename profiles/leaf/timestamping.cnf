@@ -1,0 +1,6 @@
+[ timestamping ]
+basicConstraints       = critical, CA:false
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage               = critical, digitalSignature, nonRepudiation
+extendedKeyUsage       = critical, timeStamping

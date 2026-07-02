@@ -12,9 +12,17 @@ source "${SCRIPT_DIR}/pki-env.sh"
 # CN requis (sinon gen-leaf le vérifiera plus loin au moment du DN)
 : "${CN:?Common Name (CN) required}"
 
+default_profile="server_cert"
+key_alg_norm="$(printf '%s' "${KEY_ALG:-RSA}" | tr '[:lower:]' '[:upper:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+case "$key_alg_norm" in
+  EC|EDDSA|ED25519|ED448)
+    default_profile="server_ec"
+    ;;
+esac
+
 # Une seule chose à dire: ACTION=server – gen-leaf fait tout le reste.
 # PROFILE reste accepté pour compat, mais gen-leaf consomme EXT_SECTION.
 env ACTION="server" CN="${CN}" \
   SAN="${SAN:-DNS:${CN}}" DAYS="${DAYS:-397}" \
-  PROFILE="${PROFILE:-server_cert}" EXT_SECTION="${EXT_SECTION:-${PROFILE:-server_cert}}" \
+  PROFILE="${PROFILE:-$default_profile}" EXT_SECTION="${EXT_SECTION:-${PROFILE:-$default_profile}}" \
   "${SCRIPT_DIR}/gen-leaf.sh"

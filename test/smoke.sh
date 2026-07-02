@@ -61,15 +61,14 @@ trap 'rm -rf "$WORKDIR"' EXIT
 
 info "Workspace: $WORKDIR"
 
-tar \
-  --exclude=.git \
-  --exclude=.DS_Store \
-  --exclude=root \
-  --exclude='intm-*' \
-  --exclude=draft \
-  --exclude=plan \
-  --exclude=test-results \
-  -cf - -C "$ROOT_DIR" . | tar -xf - -C "$WORKDIR"
+cp -R "$ROOT_DIR/." "$WORKDIR"
+rm -rf \
+  "$WORKDIR/.git" \
+  "$WORKDIR/root" \
+  "$WORKDIR"/intm-* \
+  "$WORKDIR/draft" \
+  "$WORKDIR/plan" \
+  "$WORKDIR/test-results"
 
 cd "$WORKDIR"
 
@@ -81,15 +80,14 @@ run_make() {
 clone_workspace() {
   local target="$1"
   mkdir -p "$target"
-  tar \
-    --exclude=.git \
-    --exclude=.DS_Store \
-    --exclude=root \
-    --exclude='intm-*' \
-    --exclude=draft \
-    --exclude=plan \
-    --exclude=test-results \
-    -cf - -C "$ROOT_DIR" . | tar -xf - -C "$target"
+  cp -R "$ROOT_DIR/." "$target"
+  rm -rf \
+    "$target/.git" \
+    "$target/root" \
+    "$target"/intm-* \
+    "$target/draft" \
+    "$target/plan" \
+    "$target/test-results"
 }
 
 run_make root CN="Smoke Root CA"
@@ -100,26 +98,38 @@ run_make int-smime CN="Smoke S/MIME CA"
 run_make int-archive CN="Smoke Archive CA"
 
 run_make server CN="app.example.test"
+run_make server CN="api.example.test" KEY_ALG="EC" KEY_CURVE="secp384r1" SAN_URI="spiffe://certnify/api"
 run_make user CN="john@example.test"
 run_make code CN="Smoke Signing Key"
 run_make email CN="john@example.test"
+run_make email CN="encrypt@example.test" SMIME_MODE="encrypt"
 run_make archive CN="Smoke Archive Seal"
+run_make doc CN="Smoke Timestamp Authority" ARCHIVE_MODE="timestamp"
 
 assert_file "root/certs/ca.cert.pem"
 assert_file "intm-web-ca/certs/app.example.test.cert.pem"
+assert_file "intm-web-ca/certs/api.example.test.cert.pem"
 assert_file "intm-auth-ca/certs/john@example.test.cert.pem"
 assert_file "intm-code-ca/certs/Smoke Signing Key.cert.pem"
 assert_file "intm-smime-ca/certs/john@example.test.cert.pem"
+assert_file "intm-smime-ca/certs/encrypt@example.test.cert.pem"
 assert_file "intm-archive-ca/certs/Smoke Archive Seal.cert.pem"
+assert_file "intm-archive-ca/certs/Smoke Timestamp Authority.cert.pem"
 assert_symlink_target "intm-web-ca/certs/chain.cert.pem" "ca.chain.cert.pem"
 
 assert_cert_text_contains "intm-web-ca/certs/app.example.test.cert.pem" "TLS Web Server Authentication" "server EKU"
+assert_cert_text_contains "intm-web-ca/certs/api.example.test.cert.pem" "URI:spiffe://certnify/api" "server URI SAN"
+assert_cert_text_not_contains "intm-web-ca/certs/api.example.test.cert.pem" "Key Encipherment" "server EC key usage"
 assert_cert_text_contains "intm-auth-ca/certs/john@example.test.cert.pem" "TLS Web Client Authentication" "user EKU"
 assert_cert_text_contains "intm-code-ca/certs/Smoke Signing Key.cert.pem" "Code Signing" "code EKU"
 assert_cert_text_contains "intm-smime-ca/certs/john@example.test.cert.pem" "E-mail Protection" "email EKU"
 assert_cert_text_contains "intm-auth-ca/certs/john@example.test.cert.pem" "email:john@example.test" "user SAN"
 assert_cert_text_contains "intm-smime-ca/certs/john@example.test.cert.pem" "email:john@example.test" "email SAN"
+assert_cert_text_contains "intm-smime-ca/certs/encrypt@example.test.cert.pem" "Key Encipherment" "smime encrypt key usage"
+assert_cert_text_not_contains "intm-smime-ca/certs/encrypt@example.test.cert.pem" "Digital Signature" "smime encrypt no digital signature"
 assert_cert_text_contains "intm-archive-ca/certs/Smoke Archive Seal.cert.pem" "CA:FALSE" "archive basic constraints"
+assert_cert_text_contains "intm-archive-ca/certs/Smoke Timestamp Authority.cert.pem" "Time Stamping" "timestamping EKU"
+assert_cert_text_contains "intm-archive-ca/certs/Smoke Timestamp Authority.cert.pem" "Digital Signature, Non Repudiation" "timestamping key usage"
 
 verify_output="$(make verify KIND=web CN="app.example.test" 2>&1)" || die "make verify failed"
 assert_contains "$verify_output" "VERIFY STATUS: OK" "verify output"

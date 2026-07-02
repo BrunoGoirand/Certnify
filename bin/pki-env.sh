@@ -14,6 +14,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 export ROOT_DIR
 export OPENSSL="${OPENSSL:-openssl}"
+export CERTNIFY_PROFILES_DIR="${CERTNIFY_PROFILES_DIR:-$ROOT_DIR/profiles}"
 
 # ---- Security: private keys must not be world-readable ----
 umask 077
@@ -139,6 +140,38 @@ require_openssl(){
 }
 
 require_openssl
+
+require_profile_file() {
+  local rel_path="$1"
+  local abs_path="${CERTNIFY_PROFILES_DIR}/${rel_path}"
+  [[ -f "$abs_path" ]] || die "Missing OpenSSL profile fragment: ${abs_path}"
+  printf '%s\n' "$abs_path"
+}
+
+append_profile_file() {
+  local out_file="$1" rel_path="$2"
+  local src
+  src="$(require_profile_file "$rel_path")"
+  printf '\n' >> "$out_file"
+  cat "$src" >> "$out_file"
+  printf '\n' >> "$out_file"
+}
+
+append_alias_section_from_existing() {
+  local out_file="$1" alias_section="$2" source_section="$3"
+  local body=""
+
+  body="$(
+    awk -v section="$source_section" '
+      $0 == "[ " section " ]" { in_section=1; next }
+      /^\[/ && in_section { exit }
+      in_section { print }
+    ' "$out_file"
+  )"
+
+  [[ -n "$body" ]] || die "Unable to build alias section '${alias_section}' from '${source_section}' in ${out_file}"
+  printf '\n[ %s ]\n%s\n' "$alias_section" "$body" >> "$out_file"
+}
 
 # ============================================
 #  Action/KIND/INT_DIR resolution & validation
@@ -785,20 +818,10 @@ C  = __C__
 O  = __O__
 OU = __OU__
 CN = __CN__
-
-[ v3_ca ]
-subjectKeyIdentifier   = hash
-authorityKeyIdentifier = keyid:always,issuer
-basicConstraints       = ${basic_constraints}
-keyUsage               = critical, keyCertSign, cRLSign
-
-# useful to sign intermediates
-[ v3_intermediate_ca ]
-subjectKeyIdentifier   = hash
-authorityKeyIdentifier = keyid:always,issuer
-basicConstraints       = critical, CA:true, pathlen:0
-keyUsage               = critical, keyCertSign, cRLSign
 CONF
+  append_profile_file "$cnf" "root/base.cnf"
+  sed -i.bak "s|__ROOT_BASIC_CONSTRAINTS__|${basic_constraints}|g" "$cnf"
+  rm -f "${cnf}.bak"
 }
 
 # Intermediate config creator
@@ -852,59 +875,23 @@ C  = __C__
 O  = __O__
 OU = __OU__
 CN = __CN__
-
-[ v3_intermediate_ca ]
-subjectKeyIdentifier   = hash
-authorityKeyIdentifier = keyid:always,issuer
-basicConstraints       = critical, CA:true, pathlen:0
-keyUsage               = critical, keyCertSign, cRLSign
-
-# Typical server cert extension; override via EXT_SECTION if different
-[ server_cert ]
-basicConstraints       = critical, CA:false
-nsCertType             = server
-nsComment              = "OpenSSL Generated Server Certificate"
-subjectKeyIdentifier   = hash
-authorityKeyIdentifier = keyid,issuer
-keyUsage               = critical, digitalSignature, keyEncipherment
-extendedKeyUsage       = serverAuth
-
-# Typical client cert extension
-[ client_cert ]
-basicConstraints       = critical, CA:false
-subjectKeyIdentifier   = hash
-authorityKeyIdentifier = keyid,issuer
-keyUsage               = critical, digitalSignature, keyEncipherment
-extendedKeyUsage       = clientAuth
-
-# Compatibility alias kept for legacy callers.
-[ usr_cert ]
-basicConstraints       = critical, CA:false
-subjectKeyIdentifier   = hash
-authorityKeyIdentifier = keyid,issuer
-keyUsage               = critical, digitalSignature, keyEncipherment
-extendedKeyUsage       = clientAuth
-
-[ code_sign ]
-basicConstraints       = critical, CA:false
-subjectKeyIdentifier   = hash
-authorityKeyIdentifier = keyid,issuer
-keyUsage               = critical, digitalSignature
-extendedKeyUsage       = codeSigning
-
-[ smime ]
-basicConstraints       = critical, CA:false
-subjectKeyIdentifier   = hash
-authorityKeyIdentifier = keyid,issuer
-keyUsage               = critical, digitalSignature, keyEncipherment
-extendedKeyUsage       = emailProtection
-
-[ archive ]
-basicConstraints       = critical, CA:false
-subjectKeyIdentifier   = hash
-authorityKeyIdentifier = keyid,issuer
-keyUsage               = critical, digitalSignature
 CONF
+  append_profile_file "$cnf" "intermediate/base.cnf"
+  append_profile_file "$cnf" "leaf/server-rsa.cnf"
+  append_alias_section_from_existing "$cnf" "server_rsa" "server_cert"
+  append_profile_file "$cnf" "leaf/server-ec.cnf"
+  append_profile_file "$cnf" "leaf/client-rsa.cnf"
+  append_alias_section_from_existing "$cnf" "client_rsa" "client_cert"
+  append_alias_section_from_existing "$cnf" "usr_cert" "client_cert"
+  append_profile_file "$cnf" "leaf/client-ec.cnf"
+  append_profile_file "$cnf" "leaf/code-sign.cnf"
+  append_profile_file "$cnf" "leaf/smime-legacy.cnf"
+  append_profile_file "$cnf" "leaf/smime-sign.cnf"
+  append_profile_file "$cnf" "leaf/smime-encrypt.cnf"
+  append_profile_file "$cnf" "leaf/archive-legacy.cnf"
+  append_profile_file "$cnf" "leaf/archive-seal.cnf"
+  append_alias_section_from_existing "$cnf" "archive" "archive_seal"
+  append_profile_file "$cnf" "leaf/timestamping.cnf"
 }
 
 # ------------------------------------------------------------------------------

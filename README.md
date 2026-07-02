@@ -9,6 +9,8 @@ Licensed under the MIT License.
 
 PKI toolkit for generating a root CA, specialized intermediates (web, auth, code, smime, archive), and issuing/verifying/revoking certificates.
 
+OpenSSL profile fragments are stored under `profiles/` and are assembled into each generated `openssl.cnf`.
+
 ## 🚀 Quick Start — PKI Toolkit
 
 Follow these simple steps to generate a complete certificate chain using PKI Toolkit.
@@ -60,6 +62,9 @@ intm-web-ca/
 
 For leaf issuance, the canonical commands are `make server`, `make user`, `make dev`, `make email`, and `make doc`.
 Compatibility aliases `make code` and `make archive` remain available.
+Legacy section names such as `server_cert`, `client_cert`, `code_sign`, `smime`, and `archive` remain supported, with additional algorithm-specific profiles available for EC-based issuance.
+For `make email`, you can also select `SMIME_MODE=sign`, `SMIME_MODE=encrypt`, or keep the default combined legacy profile.
+For `make doc`, you can also select `ARCHIVE_MODE=seal` or `ARCHIVE_MODE=timestamp`, while keeping the default legacy archive profile.
 
 ### 🌐 3. Issue a Server Certificate
 

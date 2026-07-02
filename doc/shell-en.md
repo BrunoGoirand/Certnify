@@ -2,6 +2,8 @@
 
 This document summarizes the scripts in the `bin/` directory, their main purpose, and their most visible dependencies.
 
+See also `doc/profiles-en.md` for the reference of the OpenSSL profiles used by these scripts.
+
 ## Overview
 
 | Script | Description | Main dependencies |

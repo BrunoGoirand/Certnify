@@ -103,6 +103,8 @@ source "$(dirname "$0")/pki-env.sh"
 
 REQ_CNF_TMP=""
 REQ_CNF_DN=""
+EXT_SECTION_USER_SET=0
+[[ -n "${EXT_SECTION:-}" ]] && EXT_SECTION_USER_SET=1
 cleanup() {
   [[ -n "$REQ_CNF_TMP" ]] && rm -f "$REQ_CNF_TMP"
   [[ -n "$REQ_CNF_DN"  ]] && rm -f "$REQ_CNF_DN"
@@ -243,6 +245,17 @@ SAN_URI="${SAN_URI:-}"
 
 # Extension section from intermediate cnf (e.g., server_cert, client_cert)
 EXT_SECTION="${EXT_SECTION:-server_cert}"
+
+if [[ "$EXT_SECTION_USER_SET" == "0" && -n "${ACTION:-}" ]]; then
+  case "$ACTION:$KEY_ALG" in
+    server:EC|server:EDDSA)
+      EXT_SECTION="server_ec"
+      ;;
+    user:EC|user:EDDSA)
+      EXT_SECTION="client_ec"
+      ;;
+  esac
+fi
 
 # Reduce OpenSSL chatter by default (align with gen-root.sh)
 QUIET_OPENSSL="${QUIET_OPENSSL:-1}"
@@ -528,13 +541,13 @@ info "Creating CSR for CN='${CN}' (DN: C='${C}' O='${O}' OU='${OU}')…"
 if [[ "$QUIET_OPENSSL" == "1" ]]; then
   "$OPENSSL" req -new -sha256 \
     -config "$REQ_CNF_DN" \
-    ${SAN_DNS:+-reqexts req_ext} ${SAN_IP:+-reqexts req_ext} ${SAN_EMAIL:+-reqexts req_ext} \
+    ${SAN_DNS:+-reqexts req_ext} ${SAN_IP:+-reqexts req_ext} ${SAN_EMAIL:+-reqexts req_ext} ${SAN_URI:+-reqexts req_ext} \
     -key "$KEY_PATH" \
     -out "$CSR_PATH" >/dev/null 2>&1
 else
   "$OPENSSL" req -new -sha256 \
     -config "$REQ_CNF_DN" \
-    ${SAN_DNS:+-reqexts req_ext} ${SAN_IP:+-reqexts req_ext} ${SAN_EMAIL:+-reqexts req_ext} \
+    ${SAN_DNS:+-reqexts req_ext} ${SAN_IP:+-reqexts req_ext} ${SAN_EMAIL:+-reqexts req_ext} ${SAN_URI:+-reqexts req_ext} \
     -key "$KEY_PATH" \
     -out "$CSR_PATH"
 fi
