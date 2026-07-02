@@ -14,16 +14,17 @@
 #   Mapping par défaut :
 #     server → KIND=web      → INT_DIR=intm-web-ca
 #     user   → KIND=auth     → INT_DIR=intm-auth-ca
-#     code   → KIND=code     → INT_DIR=intm-code-ca
+#     dev    → KIND=code     → INT_DIR=intm-code-ca
 #     email  → KIND=smime    → INT_DIR=intm-smime-ca
-#     archive→ KIND=archive  → INT_DIR=intm-archive-ca
+#     doc    → KIND=archive  → INT_DIR=intm-archive-ca
 #
 #   Exemples :
 #   make server  CN="app.example.com"   [SAN="DNS:app.example.com"] [DAYS=397]
 #   make user    CN="john@example.com"  [SAN="email:john@example.com"] [DAYS=825]
-#   make code    CN="CI Signing Key"    [DAYS=730]
+#   make dev     CN="CI Signing Key"    [DAYS=730]
 #   make email   CN="john@example.com"  [SAN="email:john@example.com"] [DAYS=730]
-#   make archive CN="Records Seal"      [DAYS=3650]
+#   make doc     CN="Records Seal"      [DAYS=3650]
+#   Alias compat : make code / make archive
 #
 #   (Override possible à tout moment : KIND=… ou INT_DIR=…)
 #     ex. make server KIND=staging          → INT_DIR=intm-staging-ca
@@ -66,7 +67,7 @@
 # Variables utiles
 #   CN        : Common Name (ex. app.example.com, john@example.com, etc.)
 #   SAN       : subjectAltName (ex. DNS:app.example.com | email:john@example.com | URI:...)
-#   DAYS      : Validité (jours). Valeurs par défaut selon le TYPE (server/user/code/email/archive).
+#   DAYS      : Validité (jours). Valeurs par défaut selon le TYPE (server/user/dev/email/doc).
 #   KIND      : Catégorie d’intermédiaire: web | auth | code | smime | archive | generic
 #   INT_DIR   : Dossier intermédiaire, ex. intm-web-ca (prioritaire sur KIND lorsqu’il est fourni).
 #   PROFILE   : Section d’extensions d’openssl.cnf (défauts déjà posés par TYPE).
@@ -95,9 +96,10 @@ help:
 	@echo '  -- Feuilles (INT_DIR auto-déduit; override possible via KIND=... ou INT_DIR=...):'
 	@echo '  make server  CN="app.example.com"   [SAN="DNS:app.example.com"] [DAYS=397]'
 	@echo '  make user    CN="john@example.com"  [SAN="email:john@example.com"] [DAYS=825]'
-	@echo '  make code    CN="CI Signing Key"    [DAYS=730]'
+	@echo '  make dev     CN="CI Signing Key"    [DAYS=730]'
 	@echo '  make email   CN="john@example.com"  [SAN="email:john@example.com"] [DAYS=730]'
-	@echo '  make archive CN="Records Seal"      [DAYS=3650]'
+	@echo '  make doc     CN="Records Seal"      [DAYS=3650]'
+	@echo '  aliases: make code / make archive'
 	@echo '  -- Vérification & Révocation:'
 	@echo '  make verify FILE=".../cert.crt" [CHAIN=".../chain.cert.pem"] [VERIFY_CRL=0|1] [VERIFY_MODE=normal|tolerate_revoked|info]'
 	@echo '  make revoke FILE=".../cert.crt" (ou variables acceptées par revoke-leaf.sh)'
@@ -201,7 +203,7 @@ int-archive:
 	bin/gen-intm.sh
 
 # --- Leaf issuance ---
-.PHONY: server user dev email doc
+.PHONY: server user dev email doc code archive
 
 # ===== Auto-mapping KIND / INT_DIR (définitions & macro) =====
 # (Définir avant les déclencheurs pour que $(eval $(call ...)) voie la macro)
@@ -222,8 +224,8 @@ server: PROFILE ?= server_cert
 
 user:   KIND ?= $(DEFAULT_KIND_user)
 user:   INT_DIR ?= intm-$(KIND)-ca
-user:   DAYS ?= 730
-user:   PROFILE ?= usr_cert
+user:   DAYS ?= 825
+user:   PROFILE ?= client_cert
 
 dev:    KIND ?= $(DEFAULT_KIND_dev)
 dev:    INT_DIR ?= intm-$(KIND)-ca
@@ -237,13 +239,23 @@ email:  PROFILE ?= smime
 
 doc:    KIND ?= $(DEFAULT_KIND_doc)
 doc:    INT_DIR ?= intm-$(KIND)-ca
-doc:    DAYS ?= 1095
+doc:    DAYS ?= 3650
 doc:    PROFILE ?= archive
+
+code:   KIND ?= $(DEFAULT_KIND_dev)
+code:   INT_DIR ?= intm-$(KIND)-ca
+code:   DAYS ?= 730
+code:   PROFILE ?= code_sign
+
+archive: KIND ?= $(DEFAULT_KIND_doc)
+archive: INT_DIR ?= intm-$(KIND)-ca
+archive: DAYS ?= 3650
+archive: PROFILE ?= archive
 
 # Server certs (legacy SAN kept + SAN_* pour scripts modernes)
 server:
 	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	DAYS="$(DAYS)" PROFILE="$(PROFILE)" \
+	DAYS="$(DAYS)" PROFILE="$(or $(PROFILE),server_cert)" \
 	C="$(C)" O="$(O)" OU="$(OU)" \
 	SAN_DNS="$(or $(SAN_DNS),$(CN))" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
@@ -254,9 +266,9 @@ server:
 # User (client auth)
 user:
 	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	DAYS="$(DAYS)" PROFILE="$(PROFILE)" \
+	DAYS="$(DAYS)" PROFILE="$(or $(PROFILE),client_cert)" \
 	C="$(C)" O="$(O)" OU="$(OU)" \
-	SAN_DNS="$(or $(SAN_DNS),$(CN))" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
+	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
@@ -265,9 +277,9 @@ user:
 # Code signing
 dev:
 	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	DAYS="$(DAYS)" PROFILE="$(PROFILE)" \
+	DAYS="$(DAYS)" PROFILE="$(or $(PROFILE),code_sign)" \
 	C="$(C)" O="$(O)" OU="$(OU)" \
-	SAN_DNS="$(or $(SAN_DNS),$(CN))" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
+	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
@@ -276,9 +288,9 @@ dev:
 # S/MIME
 email:
 	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	DAYS="$(DAYS)" PROFILE="$(PROFILE)" \
+	DAYS="$(DAYS)" PROFILE="$(or $(PROFILE),smime)" \
 	C="$(C)" O="$(O)" OU="$(OU)" \
-	SAN_DNS="$(or $(SAN_DNS),$(CN))" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
+	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
@@ -287,9 +299,29 @@ email:
 # Archival / Time-stamp, etc.
 doc:
 	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	DAYS="$(DAYS)" PROFILE="$(PROFILE)" \
+	DAYS="$(DAYS)" PROFILE="$(or $(PROFILE),archive)" \
 	C="$(C)" O="$(O)" OU="$(OU)" \
-	SAN_DNS="$(or $(SAN_DNS),$(CN))" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
+	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
+	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
+	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
+	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
+	bin/gen-archive.sh
+
+code:
+	INT_DIR="$(INT_DIR)" CN="$(CN)" \
+	DAYS="$(DAYS)" PROFILE="$(or $(PROFILE),code_sign)" \
+	C="$(C)" O="$(O)" OU="$(OU)" \
+	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
+	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
+	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
+	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
+	bin/gen-code.sh
+
+archive:
+	INT_DIR="$(INT_DIR)" CN="$(CN)" \
+	DAYS="$(DAYS)" PROFILE="$(or $(PROFILE),archive)" \
+	C="$(C)" O="$(O)" OU="$(OU)" \
+	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
@@ -325,7 +357,7 @@ revoke:
 # Usage:
 #   make revoke-intermediate INT_DIR=intm-my-issuing-ca REASON=cessationOfOperation [CRL_UPDATE=1] [CRL_DAYS=7]
 #   make revoke-intermediate KIND=smime REASON=keyCompromise
-.PHONY: revoke-intermediate revoke-intm-and-leafs
+.PHONY: revoke-intermediate revoke-intm-and-leafs verify-intermediate-revoked
 
 # Révoque un intermédiaire (intm-*-ca) depuis la racine
 revoke-intermediate:
@@ -352,6 +384,19 @@ revoke-intm-and-leafs:
 	QUIET_OPENSSL="$(or $(QUIET_OPENSSL),1)" \
 	DEBUG="$(or $(DEBUG),0)" \
 	bin/revoke-intm-and-leafs.sh
+
+verify-intermediate-revoked:
+	@set -euo pipefail ; \
+	DIR="$(INT_DIR)"; \
+	if [[ -z "$$DIR" && -n "$(KIND)" ]]; then DIR="intm-$(KIND)-ca"; fi ; \
+	if [[ -z "$$DIR" ]]; then echo "ERR: spécifie INT_DIR=... ou KIND=..." ; exit 2 ; fi ; \
+	INT_CERT="$$DIR/certs/ca.cert.pem"; \
+	ROOT_CRL="root/crl/ca.crl.pem"; \
+	ROOT_CA="root/certs/ca.cert.pem"; \
+	if [[ ! -f "$$INT_CERT" ]]; then echo "ERR: $$INT_CERT introuvable" ; exit 1 ; fi ; \
+	if [[ ! -f "$$ROOT_CRL" ]]; then echo "ERR: $$ROOT_CRL introuvable (lance 'make crl-root')" ; exit 1 ; fi ; \
+	if [[ ! -f "$$ROOT_CA" ]]; then echo "ERR: $$ROOT_CA introuvable" ; exit 1 ; fi ; \
+	$(OPENSSL) verify -CAfile "$$ROOT_CA" -crl_check -CRLfile "$$ROOT_CRL" "$$INT_CERT"
 
 # --- Qualité de vie ---
 .PHONY: ls-web ls-auth ls-code ls-smime ls-archive
@@ -513,4 +558,5 @@ reissue-leafs-%:
 rollback-%:
 	@set -euo pipefail ; \
 	KIND="$*"; \
-	LEGACY
+	LEGACY_DIR="$$LEGACY_DIR" \
+	bin/intm-rollback-to-legacy.sh

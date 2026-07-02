@@ -11,7 +11,7 @@ source "${SCRIPT_DIR}/pki-env.sh"
 # CN requis (sinon gen-leaf le vérifiera plus loin au moment du DN)
 : "${CN:?Common Name (CN) required}"
 
-# Une seule chose à dire: ACTION=server – gen-leaf fait tout le reste.
+# Une seule chose à dire: ACTION=user – gen-leaf fait tout le reste.
 env ACTION="user" CN="${CN}" \
-  SAN="${SAN:-DNS:${CN}}" DAYS="${DAYS:-730}" PROFILE="${PROFILE:-server_cert}" \
+  SAN="${SAN:-}" DAYS="${DAYS:-825}" PROFILE="${PROFILE:-client_cert}" \
   "${SCRIPT_DIR}/gen-leaf.sh"

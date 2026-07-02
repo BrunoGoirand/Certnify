@@ -58,6 +58,9 @@ intm-web-ca/
 
 **Tip:** You can create other intermediates for different purposes (e.g. int-auth, int-code, int-smime, int-archive).
 
+For leaf issuance, the canonical commands are `make server`, `make user`, `make dev`, `make email`, and `make doc`.
+Compatibility aliases `make code` and `make archive` remain available.
+
 ### 🌐 3. Issue a Server Certificate
 
 Generate a server certificate signed by your web intermediate CA:

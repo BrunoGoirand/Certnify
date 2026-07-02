@@ -680,6 +680,34 @@ subjectKeyIdentifier   = hash
 authorityKeyIdentifier = keyid,issuer
 keyUsage               = critical, digitalSignature, keyEncipherment
 extendedKeyUsage       = clientAuth
+
+# Compatibility alias kept for legacy callers.
+[ usr_cert ]
+basicConstraints       = critical, CA:false
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage               = critical, digitalSignature, keyEncipherment
+extendedKeyUsage       = clientAuth
+
+[ code_sign ]
+basicConstraints       = critical, CA:false
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage               = critical, digitalSignature
+extendedKeyUsage       = codeSigning
+
+[ smime ]
+basicConstraints       = critical, CA:false
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage               = critical, digitalSignature, keyEncipherment
+extendedKeyUsage       = emailProtection
+
+[ archive ]
+basicConstraints       = critical, CA:false
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage               = critical, digitalSignature
 CONF
 }
 
