@@ -155,6 +155,7 @@ root:
 	CN="$(CN)" C="$(C)" O="$(O)" OU="$(OU)" DAYS="$(DAYS)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	KEY_EDDSA="$(KEY_EDDSA)" ROOT_PATHLEN="$(ROOT_PATHLEN)" \
+	ROOT_CNF="$(ROOT_CNF)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
 	bin/gen-root.sh
 

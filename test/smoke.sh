@@ -22,11 +22,25 @@ assert_contains() {
   grep -Fq "$needle" <<<"$haystack" || die "Expected '$needle' in $label"
 }
 
+assert_not_contains() {
+  local haystack="$1" needle="$2" label="$3"
+  if grep -Fq "$needle" <<<"$haystack"; then
+    die "Did not expect '$needle' in $label"
+  fi
+}
+
 assert_cert_text_contains() {
   local cert="$1" needle="$2" label="$3"
   local text
   text="$("$OPENSSL" x509 -in "$cert" -noout -text 2>/dev/null)" || die "Unable to read certificate: $cert"
   assert_contains "$text" "$needle" "$label"
+}
+
+assert_cert_text_not_contains() {
+  local cert="$1" needle="$2" label="$3"
+  local text
+  text="$("$OPENSSL" x509 -in "$cert" -noout -text 2>/dev/null)" || die "Unable to read certificate: $cert"
+  assert_not_contains "$text" "$needle" "$label"
 }
 
 require_cmd "$OPENSSL"
@@ -54,6 +68,20 @@ cd "$WORKDIR"
 run_make() {
   info "make $*"
   make "$@" >/dev/null
+}
+
+clone_workspace() {
+  local target="$1"
+  mkdir -p "$target"
+  tar \
+    --exclude=.git \
+    --exclude=.DS_Store \
+    --exclude=root \
+    --exclude='intm-*' \
+    --exclude=draft \
+    --exclude=plan \
+    --exclude=test-results \
+    -cf - -C "$ROOT_DIR" . | tar -xf - -C "$target"
 }
 
 run_make root CN="Smoke Root CA"
@@ -100,5 +128,37 @@ assert_contains "$revoked_int_output" "OK" "verify-intermediate-revoked command 
 
 rollback_preview="$(make -n rollback-web)"
 assert_contains "$rollback_preview" "bin/intm-rollback-to-legacy.sh" "rollback recipe"
+
+EDDSA_CASE="$(mktemp -d "$TMPDIR_ROOT/certnify-root-eddsa.XXXXXX")"
+clone_workspace "$EDDSA_CASE"
+(
+  cd "$EDDSA_CASE"
+  run_make root CN="Reusable EdDSA Root" KEY_ALG="Ed25519"
+  rm -f root/certs/ca.cert.pem root/ca.meta
+  run_make root CN="Reusable EdDSA Root" KEY_ALG="RSA" KEY_SIZE="4096"
+  eddsa_meta="$(cat root/ca.meta)"
+  assert_contains "$eddsa_meta" "ALG=ED25519" "root metadata effective alg"
+  assert_contains "$eddsa_meta" "KEY_EDDSA=Ed25519" "root metadata effective eddsa"
+  assert_not_contains "$eddsa_meta" "KEY_SIZE=4096" "root metadata stale rsa size"
+)
+
+PATHLEN_CASE="$(mktemp -d "$TMPDIR_ROOT/certnify-root-pathlen.XXXXXX")"
+clone_workspace "$PATHLEN_CASE"
+(
+  cd "$PATHLEN_CASE"
+  run_make root CN="No PathLen Root" ROOT_PATHLEN=""
+  v3_ca_block="$(awk '/^\[ v3_ca \]$/{flag=1;next}/^\[/{flag=0}flag{print}' root/openssl.cnf)"
+  assert_contains "$v3_ca_block" "basicConstraints       = critical, CA:true" "root openssl.cnf v3_ca constraints"
+  assert_not_contains "$v3_ca_block" "pathlen:" "root openssl.cnf pathlen omission"
+  assert_cert_text_not_contains "root/certs/ca.cert.pem" "Path Length Constraint" "root certificate pathlen omission"
+)
+
+CUSTOM_CNF_CASE="$(mktemp -d "$TMPDIR_ROOT/certnify-root-cnf.XXXXXX")"
+clone_workspace "$CUSTOM_CNF_CASE"
+(
+  cd "$CUSTOM_CNF_CASE"
+  run_make root CN="Custom CNF Root" ROOT_CNF="custom/root.cnf"
+  assert_file "custom/root.cnf"
+)
 
 info "Smoke test passed"

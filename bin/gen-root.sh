@@ -59,7 +59,7 @@
 #
 # === File Layout ===
 # ROOT_DIR              Working directory for the root CA (default: current ./root)
-# ROOT_CNF              Path to the root’s OpenSSL configuration (auto-resolved)
+# ROOT_CNF              Path to the root’s OpenSSL configuration (default: ROOT_DIR/root/openssl.cnf)
 #
 # === Behavior & Safety Rules ===
 # - If an existing root certificate is found:
@@ -127,13 +127,13 @@ DAYS="${DAYS:-7300}"                  # 20 years
 KEY_ALG="$(echo "${KEY_ALG:-RSA}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:lower:]' '[:upper:]')"
 # used if RSA only
 KEY_SIZE="$(echo "${KEY_SIZE:-4096}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-# used if EC: prime256v1|secp384r1
+# used if EC: prime256v1|secp384r1|secp521r1
 KEY_CURVE="$(echo "${KEY_CURVE:-prime256v1}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 # used if EdDSA: Ed25519 | Ed448
 KEY_EDDSA="$(echo "${KEY_EDDSA:-Ed25519}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 
 QUIET_OPENSSL="${QUIET_OPENSSL:-1}"
-ROOT_PATHLEN="${ROOT_PATHLEN:-1}"    # pathLen for root; empty to omit
+ROOT_PATHLEN="${ROOT_PATHLEN-1}"     # pathLen for root; empty to omit
 
 # ---- Validate DN ----
 CN="$(validate_component_utf8 "CN" "$CN" "$DN_MAXLEN")"
@@ -146,7 +146,7 @@ cd "$ROOT_DIR"
 ensure_root_layout "root"
 
 ROOT_ABS="$(pwd)/root"
-ROOT_CNF="$ROOT_DIR/root/openssl.cnf"
+ROOT_CNF="${ROOT_CNF:-$ROOT_DIR/root/openssl.cnf}"
 mkdir -p "$(dirname "$ROOT_CNF")"
 
 create_root_openssl_cnf_if_missing "$ROOT_CNF" "$ROOT_ABS" "$DAYS" "${ROOT_PATHLEN:-}"
@@ -177,6 +177,21 @@ else
   info "Clé privée déjà présente: $KEY_PATH — paramètres KEY_ALG/SIZE/CURVE ignorés."
 fi
 
+effective_key_alg="$KEY_ALG"
+effective_key_size="$KEY_SIZE"
+effective_key_curve="$KEY_CURVE"
+effective_key_eddsa="$KEY_EDDSA"
+
+if [[ -s "$KEY_PATH" ]]; then
+  inspect_private_key_metadata "$KEY_PATH"
+  if [[ -n "${DETECTED_KEY_ALG:-}" ]]; then
+    effective_key_alg="$DETECTED_KEY_ALG"
+    [[ -n "${DETECTED_KEY_SIZE:-}" ]] && effective_key_size="$DETECTED_KEY_SIZE" || effective_key_size=""
+    [[ -n "${DETECTED_KEY_CURVE:-}" ]] && effective_key_curve="$DETECTED_KEY_CURVE" || effective_key_curve=""
+    [[ -n "${DETECTED_KEY_EDDSA:-}" ]] && effective_key_eddsa="$DETECTED_KEY_EDDSA" || effective_key_eddsa=""
+  fi
+fi
+
 # If cert exists too, verify key↔cert match via SPKI pin
 if [[ -s "$EXISTING_CRT" && -s "$KEY_PATH" ]]; then
   spki_cert="$(pubkey_sha256_b64 "$EXISTING_CRT" cert || true)"
@@ -197,17 +212,28 @@ if [[ ! -s "$CRT_PATH" ]]; then
   info "Self-signing ROOT certificate (${CN}) for ${DAYS} days…"
 
   # EdDSA: pas de -sha256 (OpenSSL l'ignore, mais on évite de le passer)
-  digest_args=()
-  if [[ "${KEY_ALG:-}" != "EdDSA" && "${KEY_ALG:-}" != "ed25519" && "${KEY_ALG:-}" != "ed448" ]]; then
-    digest_args=(-sha256)
-  fi
+  use_sha256=1
+  case "${effective_key_alg:-}" in
+    EDDSA|ED25519|ED448) use_sha256=0 ;;
+    *) ;;
+  esac
 
   if [[ "$QUIET_OPENSSL" == "1" ]]; then
-    "$OPENSSL" req -batch -config "$REQ_CNF" -key "$KEY_PATH" -new -x509 \
-      "${digest_args[@]}" -extensions v3_ca -days "$DAYS" -out "$CRT_PATH" >/dev/null 2>&1
+    if [[ "$use_sha256" == "1" ]]; then
+      "$OPENSSL" req -batch -config "$REQ_CNF" -key "$KEY_PATH" -new -x509 \
+        -sha256 -extensions v3_ca -days "$DAYS" -out "$CRT_PATH" >/dev/null 2>&1
+    else
+      "$OPENSSL" req -batch -config "$REQ_CNF" -key "$KEY_PATH" -new -x509 \
+        -extensions v3_ca -days "$DAYS" -out "$CRT_PATH" >/dev/null 2>&1
+    fi
   else
-    "$OPENSSL" req -batch -config "$REQ_CNF" -key "$KEY_PATH" -new -x509 \
-      "${digest_args[@]}" -extensions v3_ca -days "$DAYS" -out "$CRT_PATH"
+    if [[ "$use_sha256" == "1" ]]; then
+      "$OPENSSL" req -batch -config "$REQ_CNF" -key "$KEY_PATH" -new -x509 \
+        -sha256 -extensions v3_ca -days "$DAYS" -out "$CRT_PATH"
+    else
+      "$OPENSSL" req -batch -config "$REQ_CNF" -key "$KEY_PATH" -new -x509 \
+        -extensions v3_ca -days "$DAYS" -out "$CRT_PATH"
+    fi
   fi
   chmod 444 "$CRT_PATH"
   info "Root CA ready: $CRT_PATH"
@@ -230,7 +256,7 @@ if [[ ! -s "$CRT_PATH" ]]; then
     # Version factorisée (si write_ca_meta est dispo dans pki-env.sh)
     write_ca_meta \
       "$CRT_PATH" "root/private/ca.key.pem" "$ROOT_META" \
-      "${KEY_ALG:-}" "${KEY_SIZE:-}" "${KEY_CURVE:-}" "${KEY_EDDSA:-}" \
+      "${effective_key_alg:-}" "${effective_key_size:-}" "${effective_key_curve:-}" "${effective_key_eddsa:-}" \
       "$DAYS" "" "" "${ROOT_PATHLEN:-}" ""
     info "Metadata written: $ROOT_META"
   else
@@ -239,11 +265,11 @@ if [[ ! -s "$CRT_PATH" ]]; then
     trim() { local s="${1-}"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; printf '%s' "$s"; }
 
     # Normalisation ENV
-    alg_raw="$(trim "${KEY_ALG:-}")"
+    alg_raw="$(trim "${effective_key_alg:-}")"
     alg_lc="$(echo "$alg_raw" | tr '[:upper:]' '[:lower:]')"
-    key_size_raw="$(trim "${KEY_SIZE:-}")"
-    key_curve_raw="$(trim "${KEY_CURVE:-}")"
-    key_eddsa_raw="$(trim "${KEY_EDDSA:-}")"
+    key_size_raw="$(trim "${effective_key_size:-}")"
+    key_curve_raw="$(trim "${effective_key_curve:-}")"
+    key_eddsa_raw="$(trim "${effective_key_eddsa:-}")"
 
     meta_key_size=""
     meta_key_curve=""

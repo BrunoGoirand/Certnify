@@ -216,13 +216,37 @@ validate_country_iso() {
   printf '%s' "$v"
 }
 
+rfc2253_escape_value() {
+  local s="${1-}"
+  s="${s//\\/\\\\}"
+  s="${s//,/\\,}"
+  s="${s//+/\\+}"
+  s="${s//\"/\\\"}"
+  s="${s//</\\<}"
+  s="${s//>/\\>}"
+  s="${s//;/\\;}"
+  s="${s//=/\\=}"
+
+  if [[ "$s" == \#* ]]; then
+    s="\\$s"
+  fi
+  if [[ "$s" == " "* ]]; then
+    s="\\${s}"
+  fi
+  if [[ "$s" == *" " ]]; then
+    s="${s% }\\ "
+  fi
+
+  printf '%s' "$s"
+}
+
 # RFC2253-order DN builder to match `openssl -nameopt RFC2253`
 canonical_dn_rfc2253() {
   local parts=()
-  [[ -n "${CN:-}"  ]] && parts+=("CN=${CN}")
-  [[ -n "${OU:-}"  ]] && parts+=("OU=${OU}")
-  [[ -n "${O:-}"   ]] && parts+=("O=${O}")
-  [[ -n "${C:-}"   ]] && parts+=("C=${C}")
+  [[ -n "${CN:-}"  ]] && parts+=("CN=$(rfc2253_escape_value "$CN")")
+  [[ -n "${OU:-}"  ]] && parts+=("OU=$(rfc2253_escape_value "$OU")")
+  [[ -n "${O:-}"   ]] && parts+=("O=$(rfc2253_escape_value "$O")")
+  [[ -n "${C:-}"   ]] && parts+=("C=$(rfc2253_escape_value "$C")")
   (IFS=,; printf '%s' "${parts[*]}")
 }
 
@@ -290,8 +314,8 @@ gen_private_key() {
 
     ec)
       case "$ec_curve" in
-        prime256v1|secp384r1) ;;
-        *) die "Unsupported EC curve: ${ec_curve} (expected: prime256v1 or secp384r1)";;
+        prime256v1|secp384r1|secp521r1) ;;
+        *) die "Unsupported EC curve: ${ec_curve} (expected: prime256v1, secp384r1, or secp521r1)";;
       esac
       info "Generating private key EC (${ec_curve}) via genpkey…"
       _run "$OPENSSL" genpkey -algorithm EC \
@@ -337,6 +361,49 @@ pubkey_sha256_b64() {
     "$OPENSSL" pkey -in "$path" -pubout \
       | "$OPENSSL" pkey -pubin -outform DER \
       | "$OPENSSL" sha256 -binary | "$OPENSSL" base64
+  fi
+}
+
+inspect_private_key_metadata() {
+  local key_path="$1"
+  DETECTED_KEY_ALG=""
+  DETECTED_KEY_SIZE=""
+  DETECTED_KEY_CURVE=""
+  DETECTED_KEY_EDDSA=""
+
+  [[ -s "$key_path" ]] || return 0
+
+  local pkey_text=""
+  pkey_text="$("$OPENSSL" pkey -in "$key_path" -text -noout 2>/dev/null || true)"
+  [[ -n "$pkey_text" ]] || return 0
+
+  if grep -q '^Private-Key: (' <<<"$pkey_text"; then
+    DETECTED_KEY_ALG="RSA"
+    DETECTED_KEY_SIZE="$(awk -F'[() ]' '/Private-Key:/ {for (i=1;i<=NF;i++) if ($i ~ /^[0-9]+$/) {print $i; exit}}' <<<"$pkey_text")"
+    return 0
+  fi
+
+  if grep -Eq 'ASN1 OID:|NIST CURVE:' <<<"$pkey_text"; then
+    DETECTED_KEY_ALG="EC"
+    DETECTED_KEY_CURVE="$(
+      awk -F': *' '
+        /ASN1 OID:/ {print $2; found=1; exit}
+        /NIST CURVE:/ {print $2; found=1; exit}
+      ' <<<"$pkey_text"
+    )"
+    return 0
+  fi
+
+  if grep -q 'ED25519' <<<"$pkey_text"; then
+    DETECTED_KEY_ALG="ED25519"
+    DETECTED_KEY_EDDSA="Ed25519"
+    return 0
+  fi
+
+  if grep -q 'ED448' <<<"$pkey_text"; then
+    DETECTED_KEY_ALG="ED448"
+    DETECTED_KEY_EDDSA="Ed448"
+    return 0
   fi
 }
 
@@ -542,7 +609,11 @@ ensure_intermediate_layout() {
 
 create_root_openssl_cnf_if_missing() {
   local cnf="$1" root_abs="$2" days="$3" pathlen="${4-}"
+  local basic_constraints="critical, CA:true"
   [[ -f "$cnf" ]] && return 0
+  if [[ -n "$pathlen" ]]; then
+    basic_constraints="${basic_constraints}, pathlen:${pathlen}"
+  fi
   cat > "$cnf" <<CONF
 [ ca ]
 default_ca = CA_default
@@ -593,7 +664,7 @@ CN = __CN__
 [ v3_ca ]
 subjectKeyIdentifier   = hash
 authorityKeyIdentifier = keyid:always,issuer
-basicConstraints       = critical, CA:true, pathlen:1
+basicConstraints       = ${basic_constraints}
 keyUsage               = critical, keyCertSign, cRLSign
 
 # useful to sign intermediates
