@@ -8,6 +8,7 @@ Thumbs.db
 *.log
 
 # --- Build / dist ---
+plan/
 root/
 intm-web-ca/
 intm-auth-ca/
