@@ -1,11 +1,18 @@
-# Certnify
 
-![Certnify logo](image/Certnify.png)
+<a href="https://certnify.org/">
+  <img
+    alt="Certnify logo"
+    src="image/Certnify.png"
+    width="300"
+  >
+</a>
+
+# Certnify
 
 An `OpenSSL`-based PKI toolkit for creating a root CA, specialized intermediate CAs, and then issuing, verifying, revoking, and evolving certificates for several real-world use cases.
 
 Licensed under the MIT License.  
-© 2025 Bruno Goirand
+© 2025-26 Bruno Goirand
 
 ## Why Certnify?
 
