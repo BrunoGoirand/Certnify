@@ -13,7 +13,7 @@
 #
 # Env:
 #   INT_DIR / KIND            : select intermediate (INT_DIR wins; fallback KIND→intm-<KIND>-ca)
-#   REASON                    : unspecified|keyCompromise|CACompromise|affiliationChanged|superseded|cessationOfOperation|certificateHold|removeFromCRL|AACompromise|privilegeWithdrawn
+#   REASON                    : unspecified|keyCompromise|CACompromise|affiliationChanged|superseded|cessationOfOperation|certificateHold|AACompromise|privilegeWithdrawn
 #   MAP_PRIV_WITHDRAWN_TO     : mapping when REASON=privilegeWithdrawn (default: cessationOfOperation)
 #   CRL_UPDATE                : 1 to regenerate Root CRL after revocation (default: 0)
 #   CRL_DAYS                  : CRL validity in days for CRL_UPDATE=1 (default: 7)
@@ -24,6 +24,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=bin/pki-env.sh
 source "${SCRIPT_DIR}/pki-env.sh"
+normalize_revocation_reason
+pki_plan_or_begin
 
 OPENSSL="${OPENSSL:-openssl}"
 QUIET_OPENSSL="${QUIET_OPENSSL:-1}"
@@ -46,13 +48,7 @@ ossl() {
 }
 
 # --- Helpers ---
-normalize_int_dir() {
-  local v="$1"
-  if   [[ "$v" == "." ]]; then printf "."
-  elif [[ "$v" == */* ]]; then printf "%s" "$v"
-  elif [[ "$v" =~ ^intm-.*-ca$ ]]; then printf "%s" "$v"
-  else printf "intm-%s-ca" "$v"; fi
-}
+
 
 # --- Resolve intermediate directory (INT_DIR > KIND) ---
 DIR="${INT_DIR:-}"
@@ -62,6 +58,9 @@ elif [[ -n "${KIND:-}" ]]; then
   DIR="intm-${KIND}-ca"
 fi
 [[ -n "$DIR" ]] || die "Specify INT_DIR=... or KIND=..."
+DIR="$(resolve_authority "$DIR")"
+check_config "$DIR"
+check_config root
 dbg "DIR=$DIR (INT_DIR='${INT_DIR:-}', KIND='${KIND:-}')"
 
 ROOT_CNF="${ROOT_DIR}/root/openssl.cnf"
@@ -73,71 +72,30 @@ INT_DISABLED_FLAG="${ROOT_DIR}/${DIR}/.disabled"
 [[ -f "$ROOT_INDEX" ]] || die "Root index not found: $ROOT_INDEX"
 [[ -f "$TARGET"     ]] || die "Intermediate cert not found: $TARGET (generate intermediate first)"
 
-# --- Revocation reason normalization (OpenSSL CLI does not accept 'privilegeWithdrawn') ---
-REASON="${REASON:-cessationOfOperation}"
-MAP_TO="${MAP_PRIV_WITHDRAWN_TO:-cessationOfOperation}"
-case "$REASON" in
-  unspecified|keyCompromise|CACompromise|affiliationChanged|superseded|cessationOfOperation|certificateHold|removeFromCRL|AACompromise) ;;
-  privilegeWithdrawn)
-    warn "Reason 'privilegeWithdrawn' is not supported by OpenSSL → mapping to '$MAP_TO'."
-    REASON="$MAP_TO"
-    ;;
-  *) die "Unsupported revocation reason: '$REASON'";;
-esac
+pki_records validate "$ROOT_INDEX" >/dev/null
 
-# --- Pre-status from root index (for removeFromCRL guard) ---
-SERIAL_HEX="$(openssl_serial "$TARGET" | tr '[:lower:]' '[:upper:]')"
-[[ -n "$SERIAL_HEX" ]] || die "Unable to read intermediate serial: $TARGET"
-before_status="$(awk -F'\t' -v s="$SERIAL_HEX" '$4==s{print $1;exit}' "$ROOT_INDEX" || true)"
-
-# --- Guard for removeFromCRL (only valid for certificateHold) ---
-if [[ "$REASON" == "removeFromCRL" ]]; then
-  if [[ "$before_status" != "R" ]]; then
-    warn "removeFromCRL requested but current status in root DB is not 'R'. OpenSSL will likely fail."
-  else
-    current_reason="$("$OPENSSL" x509 -in "$TARGET" -noout -text 2>/dev/null | awk '/CRL Reason Code/ {getline; gsub(/^ +| +$/,""); print; exit}' || true)"
-    if [[ -n "$current_reason" && "$current_reason" != "certificateHold" ]]; then
-      warn "removeFromCRL applies only to 'certificateHold' (current: '$current_reason')."
-    fi
-  fi
+SERIAL_HEX="$(openssl_serial "$TARGET")"
+before_status="$(awk -F '\t' -v s="$SERIAL_HEX" '$4==s{print $1}' "$ROOT_INDEX")"
+[[ "$before_status" == V || "$before_status" == E || "$before_status" == R ]] || die "Intermediate is not uniquely recorded in root index"
+check_pair "$ROOT_DIR/root/certs/ca.cert.pem" "$ROOT_DIR/root/private/ca.key.pem"
+"$OPENSSL" verify -no_check_time -CAfile "$ROOT_DIR/root/certs/ca.cert.pem" "$TARGET" >/dev/null
+if [[ "${DRY_RUN:-0}" == 1 ]]; then
+  info "PLAN intermediate=$DIR current=$before_status crl_refresh=${CRL_UPDATE:-0}; issuance would be disabled"
+  exit 0
 fi
-
-# --- Revoke in ROOT DB (idempotent) ---
-info "Revoking intermediate: $DIR (reason=$REASON)"
-if ! ossl ca -batch -config "$ROOT_CNF" -revoke "$TARGET" -crl_reason "$REASON"; then
-  # Rerun noisily to inspect error; treat "already revoked" as success
-  if "$OPENSSL" ca -batch -config "$ROOT_CNF" -revoke "$TARGET" -crl_reason "$REASON" 2>&1 | grep -qi 'already revoked'; then
-    info "Intermediate already revoked in root DB."
-  else
-    die "OpenSSL revocation failed in root DB."
-  fi
-fi
-
-# --- Normalize ROOT index: set filename=unknown for the revoked serial ---
-dbg "Intermediate serial in ROOT DB: ${SERIAL_HEX:-<unknown>}"
-if [[ -n "$SERIAL_HEX" ]]; then
-  index_set_filename_for_revoked "$ROOT_INDEX" "$SERIAL_HEX" || true
-fi
-info "Intermediate marked revoked in root/index.txt (DIR=$DIR, reason=$REASON)"
-
-# --- Create issuance guard to block new leaf issuance until a new intermediate is generated ---
-# gen-intm.sh removes this flag to re-enable issuance.
-mkdir -p "$(dirname "$INT_DISABLED_FLAG")"
-if [[ ! -f "$INT_DISABLED_FLAG" ]]; then
-  : > "$INT_DISABLED_FLAG"
-  info "Issuance disabled for ${DIR}: created ${DIR}/.disabled"
+if [[ "$before_status" == R ]]; then
+  info "Intermediate already revoked; CRL refresh requested=${CRL_UPDATE:-0}"
 else
-  dbg "Issuance guard already present: ${DIR}/.disabled"
+  if ! ossl ca -batch -config "$ROOT_CNF" -revoke "$TARGET" -crl_reason "$REASON"; then
+    die "Revocation backend failed; inspect root index (revocation may have committed); no automatic retry"
+  fi
+  after_status="$(awk -F '\t' -v s="$SERIAL_HEX" '$4==s{print $1}' "$ROOT_INDEX")"
+  [[ "$after_status" == R ]] || die "Unexpected root index state after revocation"
+  index_set_filename_for_revoked "$ROOT_INDEX" "$SERIAL_HEX" || die "Revocation committed; index normalization failed"
 fi
-
-# --- Optional Root CRL update ---
-if [[ "${CRL_UPDATE:-0}" == "1" ]]; then
-  CRL_DAYS="${CRL_DAYS:-7}"
-  mkdir -p "${ROOT_DIR}/root/crl"
-  TMP="$(mktemp -t crl.XXXXXX || mktemp)"
-  info "Regenerating Root CRL (crldays=$CRL_DAYS)"
-  ossl ca -batch -config "$ROOT_CNF" -gencrl -crldays "$CRL_DAYS" -out "$TMP"
-  install -m 444 "$TMP" "${ROOT_DIR}/root/crl/ca.crl.pem"
-  rm -f "$TMP"
-  info "Root CRL updated: root/crl/ca.crl.pem"
+[[ -f "$INT_DISABLED_FLAG" ]] || : > "$INT_DISABLED_FLAG"
+if [[ "${CRL_UPDATE:-0}" == 1 ]]; then
+  publish_crl root root/certs/ca.cert.pem root/private/ca.key.pem root/crl/ca.crl.pem -crldays "${CRL_DAYS:-7}" \
+    || die "Intermediate revocation is committed; Root CRL refresh failed and previous CRL was preserved"
 fi
+info "Intermediate revoked; issuance disabled: $DIR"

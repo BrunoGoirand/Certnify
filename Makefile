@@ -31,12 +31,12 @@
 #     ex. make user   INT_DIR=intm-clients  → INT_DIR prioritaire
 #
 # Vérification / Révocation (feuilles)
-#   make verify FILE="path/to/cert.crt" [CHAIN=".../chain.cert.pem"] [VERIFY_CRL=0|1] [VERIFY_MODE=normal|tolerate_revoked|info]
+#   make verify KIND=web FILE="path/to/cert.crt" [VERIFY_CRL=0|1] [VERIFY_MODE=normal|tolerate_revoked|info]
 #     - ou via résolution par CN et choix d’intermédiaire :
 #       make verify KIND=web  CN="app.example.com"
 #       make verify INT_DIR="intm-smime-ca" CN="john@example.com"
 #
-#   make revoke FILE="path/to/cert.crt"
+#   make revoke KIND=web FILE="path/to/cert.crt"
 #     - ou via CN + choix d’intermédiaire :
 #       make revoke KIND=web  CN="app.example.com"        REASON="keyCompromise"
 #       make revoke INT_DIR="intm-smime-ca" CN="john@example.com" REASON="cessationOfOperation"
@@ -79,8 +79,8 @@
 #
 # Conventions & remarques
 #   - Intermédiaires : intm-<KIND>-ca (ex. intm-web-ca, intm-auth-ca, …), créés via `make intermediate`.
-#   - Les noms de fichiers de certificats utilisent une version « sanitisée » du CN (ex. '@' → '_').
-#     Les scripts de vérif/révocation résolvent automatiquement CN brut et CN sanitisé.
+#   - CN identity is distinct from filenames; see doc/crypto-policy-en.md.
+#     Ordinary names keep spaces/@; unsafe/reserved names use a digest.
 #   - Les SAN sont injectés dans le CSR et recopiés à la signature (copy_extensions = copy).
 #   - Les scripts corrigent l’index OpenSSL si `filename=unknown` (newcerts/<serial>.pem).
 # -------------------------------------------------------------
@@ -102,8 +102,8 @@ help:
 	@echo '  make doc     CN="Records Seal"      [DAYS=3650]'
 	@echo '  aliases: make code / make archive'
 	@echo '  -- Vérification & Révocation:'
-	@echo '  make verify FILE=".../cert.crt" [CHAIN=".../chain.cert.pem"] [VERIFY_CRL=0|1] [VERIFY_MODE=normal|tolerate_revoked|info]'
-	@echo '  make revoke FILE=".../cert.crt" (ou variables acceptées par revoke-leaf.sh)'
+	@echo '  make verify KIND=web FILE=".../cert.crt" [VERIFY_CRL=0|1] [VERIFY_MODE=normal|tolerate_revoked|info]'
+	@echo '  make revoke KIND=web FILE=".../cert.crt" (ou variables acceptées par revoke-leaf.sh)'
 	@echo '  make test-smoke'
 	@echo ''
 
@@ -148,11 +148,41 @@ QUIET_OPENSSL ?= 1
 # Generic profile fallback for leaf scripts that expect it
 PROFILE       ?=
 
+# Keep identity/configuration data out of recipe shell source.
+override CN := $(value CN)
+export CN
+override C := $(value C)
+export C
+override O := $(value O)
+export O
+override OU := $(value OU)
+export OU
+override SAN := $(value SAN)
+export SAN
+override SAN_DNS := $(value SAN_DNS)
+export SAN_DNS
+override SAN_IP := $(value SAN_IP)
+export SAN_IP
+override SAN_EMAIL := $(value SAN_EMAIL)
+export SAN_EMAIL
+override SAN_URI := $(value SAN_URI)
+export SAN_URI
+override PROFILE := $(value PROFILE)
+export PROFILE
+override EXT_SECTION := $(value EXT_SECTION)
+export EXT_SECTION
+override FILE := $(value FILE)
+export FILE
+override CHAIN := $(value CHAIN)
+export CHAIN
+override INT_CN := $(value INT_CN)
+export INT_CN
+
 # --- Root ---
 .PHONY: root
 
 root:
-	CN="$(CN)" C="$(C)" O="$(O)" OU="$(OU)" DAYS="$(DAYS)" \
+	CN="$${CN:-}" C="$${C:-}" O="$${O:-}" OU="$${OU:-}" DAYS="$(DAYS)" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	KEY_EDDSA="$(KEY_EDDSA)" ROOT_PATHLEN="$(ROOT_PATHLEN)" \
 	ROOT_CNF="$(ROOT_CNF)" \
@@ -163,44 +193,44 @@ root:
 .PHONY: intermediate int-web int-auth int-code int-smime int-archive
 
 intermediate:
-	KIND="$(or $(KIND),web)" CN="$(or $(CN),Web Issuing CA)" DAYS="$(or $(DAYS),3650)" \
-	C="$(C)" O="$(O)" OU="$(OU)" \
+	KIND="$(or $(KIND),web)" CN="$${CN:-Web Issuing CA}" DAYS="$(or $(DAYS),3650)" \
+	C="$${C:-}" O="$${O:-}" OU="$${OU:-}" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	INT_DIR="$(INT_DIR)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
 	bin/gen-intm.sh
 
 int-web:
-	KIND="web" CN="$(or $(CN),Web Issuing CA)" DAYS="$(or $(DAYS),3650)" \
-	C="$(C)" O="$(O)" OU="$(OU)" \
+	KIND="web" CN="$${CN:-Web Issuing CA}" DAYS="$(or $(DAYS),3650)" \
+	C="$${C:-}" O="$${O:-}" OU="$${OU:-}" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
 	bin/gen-intm.sh
 
 int-auth:
-	KIND="auth" CN="$(or $(CN),Auth Issuing CA)" DAYS="$(or $(DAYS),3650)" \
-	C="$(C)" O="$(O)" OU="$(OU)" \
+	KIND="auth" CN="$${CN:-Auth Issuing CA}" DAYS="$(or $(DAYS),3650)" \
+	C="$${C:-}" O="$${O:-}" OU="$${OU:-}" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
 	bin/gen-intm.sh
 
 int-code:
-	KIND="code" CN="$(or $(CN),Code Signing Issuing CA)" DAYS="$(or $(DAYS),3650)" \
-	C="$(C)" O="$(O)" OU="$(OU)" \
+	KIND="code" CN="$${CN:-Code Signing Issuing CA}" DAYS="$(or $(DAYS),3650)" \
+	C="$${C:-}" O="$${O:-}" OU="$${OU:-}" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
 	bin/gen-intm.sh
 
 int-smime:
-	KIND="smime" CN="$(or $(CN),S/MIME Issuing CA)" DAYS="$(or $(DAYS),3650)" \
-	C="$(C)" O="$(O)" OU="$(OU)" \
+	KIND="smime" CN="$${CN:-S/MIME Issuing CA}" DAYS="$(or $(DAYS),3650)" \
+	C="$${C:-}" O="$${O:-}" OU="$${OU:-}" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
 	bin/gen-intm.sh
 
 int-archive:
-	KIND="archive" CN="$(or $(CN),Archive Issuing CA)" DAYS="$(or $(DAYS),3650)" \
-	C="$(C)" O="$(O)" OU="$(OU)" \
+	KIND="archive" CN="$${CN:-Archive Issuing CA}" DAYS="$(or $(DAYS),3650)" \
+	C="$${C:-}" O="$${O:-}" OU="$${OU:-}" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
 	bin/gen-intm.sh
@@ -252,10 +282,10 @@ archive: DAYS ?= 3650
 
 # Server certs (legacy SAN kept + SAN_* pour scripts modernes)
 server:
-	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	DAYS="$(DAYS)" PROFILE="$(PROFILE)" \
-	C="$(C)" O="$(O)" OU="$(OU)" \
-	SAN_DNS="$(or $(SAN_DNS),$(CN))" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
+	INT_DIR="$(INT_DIR)" CN="$${CN:-}" \
+	DAYS="$(DAYS)" PROFILE="$${PROFILE:-}" \
+	C="$${C:-}" O="$${O:-}" OU="$${OU:-}" \
+	SAN_DNS="$${SAN_DNS:-}" SAN_IP="$${SAN_IP:-}" SAN_EMAIL="$${SAN_EMAIL:-}" SAN_URI="$${SAN_URI:-}" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
@@ -263,10 +293,10 @@ server:
 
 # User (client auth)
 user:
-	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	DAYS="$(DAYS)" PROFILE="$(PROFILE)" \
-	C="$(C)" O="$(O)" OU="$(OU)" \
-	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
+	INT_DIR="$(INT_DIR)" CN="$${CN:-}" \
+	DAYS="$(DAYS)" PROFILE="$${PROFILE:-}" \
+	C="$${C:-}" O="$${O:-}" OU="$${OU:-}" \
+	SAN_DNS="$${SAN_DNS:-}" SAN_IP="$${SAN_IP:-}" SAN_EMAIL="$${SAN_EMAIL:-}" SAN_URI="$${SAN_URI:-}" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
@@ -274,10 +304,10 @@ user:
 
 # Code signing
 dev:
-	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	DAYS="$(DAYS)" PROFILE="$(or $(PROFILE),code_sign)" \
-	C="$(C)" O="$(O)" OU="$(OU)" \
-	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
+	INT_DIR="$(INT_DIR)" CN="$${CN:-}" \
+	DAYS="$(DAYS)" PROFILE="$${PROFILE:-code_sign}" \
+	C="$${C:-}" O="$${O:-}" OU="$${OU:-}" \
+	SAN_DNS="$${SAN_DNS:-}" SAN_IP="$${SAN_IP:-}" SAN_EMAIL="$${SAN_EMAIL:-}" SAN_URI="$${SAN_URI:-}" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
@@ -285,10 +315,10 @@ dev:
 
 # S/MIME
 email:
-	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	DAYS="$(DAYS)" PROFILE="$(PROFILE)" SMIME_MODE="$(SMIME_MODE)" \
-	C="$(C)" O="$(O)" OU="$(OU)" \
-	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
+	INT_DIR="$(INT_DIR)" CN="$${CN:-}" \
+	DAYS="$(DAYS)" PROFILE="$${PROFILE:-}" SMIME_MODE="$(SMIME_MODE)" \
+	C="$${C:-}" O="$${O:-}" OU="$${OU:-}" \
+	SAN_DNS="$${SAN_DNS:-}" SAN_IP="$${SAN_IP:-}" SAN_EMAIL="$${SAN_EMAIL:-}" SAN_URI="$${SAN_URI:-}" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
@@ -296,30 +326,30 @@ email:
 
 # Archival / Time-stamp, etc.
 doc:
-	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	DAYS="$(DAYS)" PROFILE="$(PROFILE)" ARCHIVE_MODE="$(ARCHIVE_MODE)" \
-	C="$(C)" O="$(O)" OU="$(OU)" \
-	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
+	INT_DIR="$(INT_DIR)" CN="$${CN:-}" \
+	DAYS="$(DAYS)" PROFILE="$${PROFILE:-}" ARCHIVE_MODE="$(ARCHIVE_MODE)" \
+	C="$${C:-}" O="$${O:-}" OU="$${OU:-}" \
+	SAN_DNS="$${SAN_DNS:-}" SAN_IP="$${SAN_IP:-}" SAN_EMAIL="$${SAN_EMAIL:-}" SAN_URI="$${SAN_URI:-}" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
 	bin/gen-archive.sh
 
 code:
-	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	DAYS="$(DAYS)" PROFILE="$(or $(PROFILE),code_sign)" \
-	C="$(C)" O="$(O)" OU="$(OU)" \
-	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
+	INT_DIR="$(INT_DIR)" CN="$${CN:-}" \
+	DAYS="$(DAYS)" PROFILE="$${PROFILE:-code_sign}" \
+	C="$${C:-}" O="$${O:-}" OU="$${OU:-}" \
+	SAN_DNS="$${SAN_DNS:-}" SAN_IP="$${SAN_IP:-}" SAN_EMAIL="$${SAN_EMAIL:-}" SAN_URI="$${SAN_URI:-}" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
 	bin/gen-code.sh
 
 archive:
-	INT_DIR="$(INT_DIR)" CN="$(CN)" \
-	DAYS="$(DAYS)" PROFILE="$(PROFILE)" ARCHIVE_MODE="$(ARCHIVE_MODE)" \
-	C="$(C)" O="$(O)" OU="$(OU)" \
-	SAN_DNS="$(SAN_DNS)" SAN_IP="$(SAN_IP)" SAN_EMAIL="$(SAN_EMAIL)" SAN_URI="$(SAN_URI)" \
+	INT_DIR="$(INT_DIR)" CN="$${CN:-}" \
+	DAYS="$(DAYS)" PROFILE="$${PROFILE:-}" ARCHIVE_MODE="$(ARCHIVE_MODE)" \
+	C="$${C:-}" O="$${O:-}" OU="$${OU:-}" \
+	SAN_DNS="$${SAN_DNS:-}" SAN_IP="$${SAN_IP:-}" SAN_EMAIL="$${SAN_EMAIL:-}" SAN_URI="$${SAN_URI:-}" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" \
 	FORCE_NEW_KEY="$(or $(FORCE_NEW_KEY),0)" \
 	QUIET_OPENSSL="$(QUIET_OPENSSL)" \
@@ -329,8 +359,8 @@ archive:
 .PHONY: verify revoke
 
 verify:
-	FILE="$(FILE)" \
-	CHAIN="$(CHAIN)" \
+	FILE="$${FILE:-}" \
+	CHAIN="$${CHAIN:-}" \
 	VERIFY_CRL="$(or $(VERIFY_CRL),0)" \
 	VERIFY_MODE="$(or $(VERIFY_MODE),normal)" \
 	INT_DIR="$(INT_DIR)" \
@@ -340,8 +370,8 @@ verify:
 revoke:
 	INT_DIR="$(INT_DIR)" \
 	KIND="$(KIND)" \
-	CN="$(CN)" \
-	FILE="$(FILE)" \
+	CN="$${CN:-}" \
+	FILE="$${FILE:-}" \
 	SERIAL="$(SERIAL)" \
 	REASON="$(or $(REASON),cessationOfOperation)" \
 	CRL_UPDATE="$(or $(CRL_UPDATE),1)" \
@@ -384,17 +414,7 @@ revoke-intm-and-leafs:
 	bin/revoke-intm-and-leafs.sh
 
 verify-intermediate-revoked:
-	@set -euo pipefail ; \
-	DIR="$(INT_DIR)"; \
-	if [[ -z "$$DIR" && -n "$(KIND)" ]]; then DIR="intm-$(KIND)-ca"; fi ; \
-	if [[ -z "$$DIR" ]]; then echo "ERR: spécifie INT_DIR=... ou KIND=..." ; exit 2 ; fi ; \
-	INT_CERT="$$DIR/certs/ca.cert.pem"; \
-	ROOT_CRL="root/crl/ca.crl.pem"; \
-	ROOT_CA="root/certs/ca.cert.pem"; \
-	if [[ ! -f "$$INT_CERT" ]]; then echo "ERR: $$INT_CERT introuvable" ; exit 1 ; fi ; \
-	if [[ ! -f "$$ROOT_CRL" ]]; then echo "ERR: $$ROOT_CRL introuvable (lance 'make crl-root')" ; exit 1 ; fi ; \
-	if [[ ! -f "$$ROOT_CA" ]]; then echo "ERR: $$ROOT_CA introuvable" ; exit 1 ; fi ; \
-	$(OPENSSL) verify -CAfile "$$ROOT_CA" -crl_check -CRLfile "$$ROOT_CRL" "$$INT_CERT"
+	INT_DIR="$(INT_DIR)" KIND="$(KIND)" CRL_INT_DIR="$(CRL_INT_DIR)" bin/crl.sh verify-intermediate
 
 # --- Qualité de vie ---
 .PHONY: ls-web ls-auth ls-code ls-smime ls-archive test-smoke
@@ -422,18 +442,12 @@ tree:
 
 clean:
 	# détruit racine et tous les intermédiaires
-	rm -rf root intm-* out
+	bin/crl.sh clean
 
 # ========= CRL de la RACINE =========
 # Usage: make crl-root
 crl-root:
-	@set -euo pipefail ; \
-	cd root ; \
-	mkdir -p crl ; \
-	test -f crlnumber || echo 1000 > crlnumber ; \
-	$(OPENSSL) ca -config openssl.cnf -gencrl -out crl/ca.crl.pem ; \
-	chmod 444 crl/ca.crl.pem ; \
-	echo "[OK] CRL racine écrite : root/crl/ca.crl.pem"
+	INT_DIR="$(INT_DIR)" KIND="$(KIND)" CRL_INT_DIR="$(CRL_INT_DIR)" bin/crl.sh root
 
 # ========= CRL de l’intermédiaire choisi (par CRL_INT_DIR, INT_DIR ou KIND) =========
 # Exemples :
@@ -443,44 +457,14 @@ crl-root:
 .PHONY: crl crl-show crl-all
 
 crl:
-	@set -euo pipefail ; \
-	CRL_DAYS="$${CRL_DAYS:-7}"; \
-	DIR="$${CRL_INT_DIR:-$${INT_DIR:-}}"; \
-	if [[ -z "$$DIR" && -n "$${KIND:-}" ]]; then DIR="intm-$${KIND}-ca"; fi ; \
-	if [[ -z "$$DIR" ]]; then echo "ERR: spécifie CRL_INT_DIR=..., ou INT_DIR=..., ou KIND=..." ; exit 2 ; fi ; \
-	cd "$$DIR" ; \
-	if [[ ! -f openssl.cnf ]]; then echo "ERR: $$DIR/openssl.cnf introuvable" ; exit 1 ; fi ; \
-	mkdir -p crl ; \
-	tmp="$$(mktemp -t crl.XXXXXX || mktemp)" ; \
-	$(OPENSSL) ca -batch -config openssl.cnf -gencrl -crldays "$$CRL_DAYS" -out "$$tmp" ; \
-	install -m 444 "$$tmp" crl/ca.crl.pem ; rm -f "$$tmp" ; \
-	echo "[OK ] CRL generated at $$DIR/crl/ca.crl.pem"
+	INT_DIR="$(INT_DIR)" KIND="$(KIND)" CRL_INT_DIR="$(CRL_INT_DIR)" bin/crl.sh generate
 
 crl-show:
-	@set -euo pipefail ; \
-	DIR="$${CRL_INT_DIR:-$${INT_DIR:-}}"; \
-	if [[ -z "$$DIR" && -n "$${KIND:-}" ]]; then DIR="intm-$${KIND}-ca"; fi ; \
-	if [[ -z "$$DIR" ]]; then echo "ERR: spécifie CRL_INT_DIR=..., ou INT_DIR=..., ou KIND=..." ; exit 2 ; fi ; \
-	cd "$$DIR" ; \
-	if [[ ! -f crl/ca.crl.pem ]]; then echo "ERR: $$DIR/crl/ca.crl.pem introuvable (lance 'make crl')" ; exit 1 ; fi ; \
-	$(OPENSSL) crl -in crl/ca.crl.pem -noout -text | sed -n '1,120p'
+	INT_DIR="$(INT_DIR)" KIND="$(KIND)" CRL_INT_DIR="$(CRL_INT_DIR)" bin/crl.sh show
 
 # ========= Régénérer les CRL de TOUS les intermédiaires intm-* (s’ils ont openssl.cnf) =========
 crl-all:
-	@set -euo pipefail ; \
-	shopt -s nullglob ; \
-	CRL_DAYS="$${CRL_DAYS:-7}"; \
-	for d in intm-* ; do \
-	  if [[ -f "$$d/openssl.cnf" ]]; then \
-	    echo "[..] Generating CRL for $$d" ; \
-	    ( cd "$$d" && mkdir -p crl && tmp="$$(mktemp -t crl.XXXXXX || mktemp)" && \
-	      $(OPENSSL) ca -batch -config openssl.cnf -gencrl -crldays "$$CRL_DAYS" -out "$$tmp" && \
-	      install -m 444 "$$tmp" crl/ca.crl.pem && rm -f "$$tmp" && \
-	      echo "[OK] $$d/crl/ca.crl.pem" ); \
-	  else \
-	    echo "[SKIP] $$d (pas d'openssl.cnf)" ; \
-	  fi ; \
-	done
+	INT_DIR="$(INT_DIR)" KIND="$(KIND)" CRL_INT_DIR="$(CRL_INT_DIR)" bin/crl.sh all
 
 # ========= Affiche le serial de l'intermédiaire choisi =========
 # Usage :
@@ -488,17 +472,7 @@ crl-all:
 #   make show-intermediate-serial KIND=web
 .PHONY: show-intermediate-serial
 show-intermediate-serial:
-	@set -euo pipefail ; \
-	DIR="$(INT_DIR)"; \
-	if [[ -z "$$DIR" && -n "$(KIND)" ]]; then DIR="intm-$(KIND)-ca"; fi ; \
-	if [[ -z "$$DIR" ]]; then echo "ERR: spécifie INT_DIR=... ou KIND=..." ; exit 2 ; fi ; \
-	CERT="$$DIR/certs/ca.cert.pem"; \
-	if [[ ! -f "$$CERT" ]]; then echo "ERR: $$CERT introuvable (lance 'make intermediate')"; exit 1 ; fi ; \
-	serial="$$($(OPENSSL) x509 -in "$$CERT" -noout -serial | sed 's/^serial=//')" ; \
-	serial_colon="$$(printf '%s' "$$serial" | sed 's/../&:/g;s/:$$//')" ; \
-	echo "Intermédiaire : $$DIR"; \
-	echo "Serial (hex)  : $$serial"; \
-	echo "Serial (:fmt) : $$serial_colon"
+	INT_DIR="$(INT_DIR)" KIND="$(KIND)" CRL_INT_DIR="$(CRL_INT_DIR)" bin/crl.sh serial
 
 # ========= Liste des entrées révoquées de la CRL racine en surlignant l'intermédiaire choisi =========
 # Usage :
@@ -506,28 +480,15 @@ show-intermediate-serial:
 #   make crl-root-revoked KIND=smime
 .PHONY: crl-root-revoked
 crl-root-revoked:
-	@set -euo pipefail ; \
-	cd root ; \
-	DIR="$${INT_DIR:-}"; \
-	if [[ -z "$$DIR" && -n "$${KIND:-}" ]]; then DIR="intm-$${KIND}-ca"; fi ; \
-	if [[ -z "$$DIR" ]]; then echo "ERR: spécifie INT_DIR=... ou KIND=..." ; exit 2 ; fi ; \
-	INT_CERT="../$$DIR/certs/ca.cert.pem"; \
-	if [[ ! -f "$$INT_CERT" ]]; then echo "ERR: $$INT_CERT introuvable (lance 'make intermediate')" ; exit 1 ; fi ; \
-	if [[ ! -f crl/ca.crl.pem ]]; then echo "ERR: root/crl/ca.crl.pem introuvable (lance 'make crl-root')" ; exit 1 ; fi ; \
-	serial="$$($(OPENSSL) x509 -in "$$INT_CERT" -noout -serial | sed 's/^serial=//')" ; \
-	serial_colon="$$(printf '%s' "$$serial" | sed 's/../&:/g;s/:$$//')" ; \
-	echo "Recherche du serial $$serial (ou $$serial_colon) dans la CRL racine..." ; \
-	$(OPENSSL) crl -in crl/ca.crl.pem -noout -text | \
-	  sed -n '/Revoked Certificates:/,/Signature Algorithm/p' | \
-	  GREP_COLOR='1;31' grep -E --color=always -n "Serial Number:[[:space:]]*($$serial|$$serial_colon)|^|$$" || true
+	INT_DIR="$(INT_DIR)" KIND="$(KIND)" CRL_INT_DIR="$(CRL_INT_DIR)" bin/crl.sh root-revoked
 
 # --- Rollover d'un intermédiaire (nouvelle clé/CSR/cert + alias optionnel) ---
 .PHONY: rollover-%
 rollover-%:
 	KIND="$*" \
-	INT_CN="$(or $(INT_CN),$(shell echo $* | tr a-z A-Z) CA v2)" \
+	INT_CN="$${INT_CN:-$(shell echo $* | tr a-z A-Z) CA v2}" \
 	DAYS="$(or $(DAYS),3650)" \
-	C="$(C)" O="$(O)" OU="$(OU)" \
+	C="$${C:-}" O="$${O:-}" OU="$${OU:-}" \
 	KEY_ALG="$(KEY_ALG)" KEY_SIZE="$(KEY_SIZE)" KEY_CURVE="$(KEY_CURVE)" KEY_EDDSA="$(KEY_EDDSA)" \
 	INT_DIR_NEW="$(INT_DIR_NEW)" \
 	MAKE_ALIAS="$(or $(MAKE_ALIAS),1)" \
@@ -545,19 +506,44 @@ list-leafs-%:
 
 .PHONY: reissue-leafs-%
 reissue-leafs-%:
-	@set -euo pipefail ; \
-	KIND="$*"; \
-	ACTIVE_DIR="$${ACTIVE_DIR:-intm-$*-ca}"; \
-	# Laisse le script choisir INPUT si non fourni
-	KIND="$$KIND" ACTIVE_DIR="$$ACTIVE_DIR" INPUT="$$INPUT" \
-	ISSUE_CMD="$$ISSUE_CMD" DRY_RUN="$$DRY_RUN" \
+	@KIND="$*" ACTIVE_DIR="$${ACTIVE_DIR:-intm-$*-ca}" \
+	INPUT="$${INPUT:-}" LEGACY_DIR="$${LEGACY_DIR:-}" \
+	ISSUE_CMD="$${ISSUE_CMD:-}" DRY_RUN="$${DRY_RUN:-0}" \
 	COL_SERIAL="$${COL_SERIAL:-1}" COL_EXPIRES="$${COL_EXPIRES:-2}" COL_CN="$${COL_CN:-3}" \
-	PROFILE="$$PROFILE" DAYS="$$DAYS" \
+	PROFILE="$${PROFILE:-}" DAYS="$(DAYS)" \
 	bin/intm-reissue-leafs.sh
 
 .PHONY: rollback-%
 rollback-%:
-	@set -euo pipefail ; \
-	KIND="$*"; \
-	LEGACY_DIR="$$LEGACY_DIR" \
-	bin/intm-rollback-to-legacy.sh
+	KIND="$*" LEGACY_DIR="$(LEGACY_DIR)" bin/intm-rollback-to-legacy.sh
+
+# Source-only packaging and regression fixture gate (test dependency: Python 3).
+.PHONY: test-stage0
+test-stage0:
+	python3 -B test/stage0.py
+
+.PHONY: test-stage1
+test-stage1:
+	python3 -B test/stage1.py
+
+.PHONY: test-stage2
+test-stage2:
+	python3 -B test/stage2.py
+
+.PHONY: test-stage3
+test-stage3:
+	python3 -B test/stage3.py
+
+.PHONY: test-stage4
+test-stage4:
+	python3 -B test/stage4.py
+
+.PHONY: test-stage5
+test-stage5:
+	python3 -B test/stage5.py
+
+export PROFILE
+
+.PHONY: test-stage6
+test-stage6:
+	python3 -B test/stage6.py

@@ -100,17 +100,19 @@
 set -euo pipefail
 # shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
+pki_begin
 
 REQ_CNF_TMP=""
 REQ_CNF_DN=""
+EXT_SECTION="${EXT_SECTION:-${PROFILE:-}}"
 EXT_SECTION_USER_SET=0
 [[ -n "${EXT_SECTION:-}" ]] && EXT_SECTION_USER_SET=1
 cleanup() {
   [[ -n "$REQ_CNF_TMP" ]] && rm -f "$REQ_CNF_TMP"
   [[ -n "$REQ_CNF_DN"  ]] && rm -f "$REQ_CNF_DN"
-  release_locks
+  return 0
 }
-trap cleanup EXIT
+trap 'rc=$?; cleanup; pki_exit "$rc"' EXIT
 
 # --- Action-aware mode (server|user|dev|email|doc) ---
 # Priorité à ACTION; TYPE reste supporté pour compat (TYPE=server → ACTION=server)
@@ -130,10 +132,6 @@ if [[ -n "$ACTION" ]]; then
       # selon ta conf openssl.cnf: client_cert | usr_cert
       : "${EXT_SECTION:=client_cert}"
       : "${DAYS:=825}"
-      # petit confort: si aucun SAN_* défini et CN ressemble à un email → SAN_EMAIL=CN
-      if [[ -z "${SAN_DNS:-}${SAN_IP:-}${SAN_EMAIL:-}" && "$CN" =~ @ ]]; then
-        SAN_EMAIL="${CN}"
-      fi
       ;;
     dev)
       : "${EXT_SECTION:=code_sign}"
@@ -142,10 +140,6 @@ if [[ -n "$ACTION" ]]; then
     email)
       : "${EXT_SECTION:=smime}"
       : "${DAYS:=730}"
-      # si rien de posé et CN est email → SAN_EMAIL=CN
-      if [[ -z "${SAN_DNS:-}${SAN_IP:-}${SAN_EMAIL:-}" && "$CN" =~ @ ]]; then
-        SAN_EMAIL="${CN}"
-      fi
       ;;
     doc)
       : "${EXT_SECTION:=archive}"
@@ -156,58 +150,6 @@ if [[ -n "$ACTION" ]]; then
       ;;
   esac
 
-  # Compat "legacy SAN=" : SAN="DNS:...,IP:...,email:...,URI:..."
-  # -> remplit SAN_DNS / SAN_IP / SAN_EMAIL / SAN_URI (sans écraser si déjà posés, concatène avec des virgules)
-  if [[ -n "${SAN:-}" ]]; then
-    # helper pour concaténer dans une CSV (var name + value)
-    _append_csv() {
-      # $1=varname, $2=value
-      local _vn="$1" _val="$2"
-      [[ -z "$_val" ]] && return 0
-      # shellcheck disable=SC2154
-      local _cur; _cur="$(eval "printf '%s' \"\${$_vn:-}\"")"
-      if [[ -n "$_cur" ]]; then
-        eval "$_vn=\"\$_cur,\$_val\""
-      else
-        eval "$_vn=\"\$_val\""
-      fi
-    }
-
-    IFS=',' read -r -a _tokens <<< "$SAN"
-    for t in "${_tokens[@]}"; do
-      t="$(trim_spaces "$t")"
-      [[ -z "$t" ]] && continue
-
-      # Sépare prefixe/valeur et normalise le prefixe en MAJ
-      if [[ "$t" == *:* ]]; then
-        prefix="${t%%:*}"
-        value="${t#*:}"
-        upper="$(printf '%s' "$prefix" | tr '[:lower:]' '[:upper:]')"
-        case "$upper" in
-          DNS)
-            _append_csv SAN_DNS "$value"
-            ;;
-          IP)
-            _append_csv SAN_IP "$value"
-            ;;
-          EMAIL)
-            _append_csv SAN_EMAIL "$value"
-            ;;
-          URI)
-            _append_csv SAN_URI "$value"
-            ;;
-          *)
-            # Si pas reconnu mais pas de ':', on peut l’assimiler à DNS plus haut; ici on ignore
-            ;;
-        esac
-      else
-        # Valeur brute sans préfixe → interpréter comme DNS si rien n’est encore posé
-        if [[ -z "$SAN_DNS" ]]; then
-          _append_csv SAN_DNS "$t"
-        fi
-      fi
-    done
-  fi
 fi
 
 # ---- Inputs / defaults ----
@@ -243,19 +185,13 @@ SAN_IP="${SAN_IP:-}"
 SAN_EMAIL="${SAN_EMAIL:-}"
 SAN_URI="${SAN_URI:-}"
 
+normalize_key_request
+prepare_sans
+
+DAYS="${DAYS:-397}"
+
 # Extension section from intermediate cnf (e.g., server_cert, client_cert)
 EXT_SECTION="${EXT_SECTION:-server_cert}"
-
-if [[ "$EXT_SECTION_USER_SET" == "0" && -n "${ACTION:-}" ]]; then
-  case "$ACTION:$KEY_ALG" in
-    server:EC|server:EDDSA)
-      EXT_SECTION="server_ec"
-      ;;
-    user:EC|user:EDDSA)
-      EXT_SECTION="client_ec"
-      ;;
-  esac
-fi
 
 # Reduce OpenSSL chatter by default (align with gen-root.sh)
 QUIET_OPENSSL="${QUIET_OPENSSL:-1}"
@@ -275,11 +211,12 @@ if [[ -z "${ACTION:-}" ]]; then
       KIND="$(kind_from_int_dir "$INT_DIR")"
     fi
   else
-    INT_DIR="intm-${KIND}-ca"
+    INT_DIR="$(resolve_authority "intm-${KIND}-ca")"
     ensure_safe_int_dir "$INT_DIR"
   fi
 fi
 
+INT_DIR="$(resolve_authority "$INT_DIR")"
 info "Using intermediate directory: ${INT_DIR}"
 
 # ---- Validate DN ----
@@ -291,30 +228,46 @@ C="$(validate_country_iso "$C")"
 # ---- Paths & layout ----
 cd "$ROOT_DIR"
 int_lock_name="$(printf '%s' "$INT_DIR" | tr '/ ' '__')"
-acquire_lock "intm-${int_lock_name}"
+acquire_lock root-ca
 ensure_intermediate_layout "$INT_DIR"
 
 # Always force INT_CNF to match INT_DIR
 INT_CNF="$ROOT_DIR/$INT_DIR/openssl.cnf"
 [[ -f "$INT_CNF" ]] || die "Intermediate openssl.cnf not found: $INT_CNF (create the intermediate first)"
 
+check_config "$INT_DIR"
+check_config root
+
 # ---- Rotate mode (chemin suffixé) ----
 ROTATE_MODE=0
 ROTATE_TAG=""
 if [[ "${FORCE_NEW_KEY:-0}" == "rotate" ]]; then
   ROTATE_MODE=1
-  ROTATE_TAG="r$(date +%Y%m%d%H%M%S 2>/dev/null || date +%s)"
+  ROTATE_TAG="r$(date +%Y%m%d%H%M%S 2>/dev/null || date +%s)-$$"
 fi
 
 # Base des noms de fichiers pour cette émission
-BASE_CN="${CN}"
+ARTIFACT_STEM="$(leaf_stem "$CN")"
+BASE_CN="$ARTIFACT_STEM"
 if [[ "$ROTATE_MODE" == "1" ]]; then
-  BASE_CN="${CN}-${ROTATE_TAG}"
+  BASE_CN="rot-${ROTATE_TAG}-${ARTIFACT_STEM}"
 fi
 
 KEY_PATH="$INT_DIR/private/${BASE_CN}.key.pem"
 CSR_PATH="$INT_DIR/csr/${BASE_CN}.csr.pem"
 CRT_PATH="$INT_DIR/certs/${BASE_CN}.cert.pem"
+
+authority_path "$INT_DIR" "private/${BASE_CN}.key.pem" >/dev/null
+authority_path "$INT_DIR" "csr/${BASE_CN}.csr.pem" >/dev/null
+authority_path "$INT_DIR" "certs/${BASE_CN}.cert.pem" >/dev/null
+
+# Determine policy from the key that will actually be used, before maintenance.
+effective_alg="$KEY_ALG"
+if [[ -s "$KEY_PATH" && "$FORCE_NEW_KEY" == 0 ]]; then
+  inspect_private_key_metadata "$KEY_PATH"; effective_alg="$DETECTED_KEY_ALG"
+fi
+select_leaf_policy "$effective_alg"
+claim_leaf_name check
 
 # ---- Preflight: block issuance if intermediate is revoked/disabled ----
 INT_CA_CERT="$INT_DIR/certs/ca.cert.pem"
@@ -356,6 +309,10 @@ if [[ -n "$ca_pub_fp" && -n "$key_pub_fp" && "$ca_pub_fp" != "$key_pub_fp" ]]; t
   die  "Refusing to sign with a mismatched CA cert/key."
 fi
 
+archive_generation "$INT_DIR"
+CURRENT_ISSUER_ID="$(certificate_id "$INT_CA_CERT")"
+[[ -z "${CERTNIFY_EXPECTED_ISSUER:-}" || "$CERTNIFY_EXPECTED_ISSUER" == "$CURRENT_ISSUER_ID" ]] || die "Authority generation changed during batch"
+
 # ---- Optional: refresh intermediate DB & CRL before duplicate check (Bash 3.2-safe) ----
 # AUTO_UPDATEDB=1            → run "openssl ca -updatedb" to flip expired entries to 'E'
 # REFRESH_CRL_BEFORE_ISSUE=0 → set to 1 to regenerate intermediate CRL right before issuing
@@ -363,26 +320,23 @@ AUTO_UPDATEDB="${AUTO_UPDATEDB:-1}"
 REFRESH_CRL_BEFORE_ISSUE="${REFRESH_CRL_BEFORE_ISSUE:-0}"
 CRL_DAYS="${CRL_DAYS:-7}"
 
+# Reject malformed history/counters before optional database maintenance or keys.
+PKI_RECORD_COUNTER="$(cat "$INT_DIR/serial")" pki_records serial "$INT_DIR/index.txt" >/dev/null
+
 # Keep the index up-to-date (marks expired entries as 'E')
 if [[ "$AUTO_UPDATEDB" == "1" ]]; then
   if [[ "$QUIET_OPENSSL" == "1" ]]; then
-    "$OPENSSL" ca -config "$INT_CNF" -updatedb >/dev/null 2>&1 || true
+    "$OPENSSL" ca -config "$INT_CNF" -updatedb >/dev/null 2>&1 || die "updatedb failed before issuance; inspect index state"
   else
-    "$OPENSSL" ca -config "$INT_CNF" -updatedb || true
+    "$OPENSSL" ca -config "$INT_CNF" -updatedb || die "updatedb failed before issuance; inspect index state"
   fi
 fi
 
 # Optionally refresh the intermediate CRL (does not affect duplicate logic)
 if [[ "$REFRESH_CRL_BEFORE_ISSUE" == "1" ]]; then
-  mkdir -p "$INT_DIR/crl"
-  TMP_CRL="$(mktemp -t crl.intm.XXXXXX || mktemp)"
-  if [[ "$QUIET_OPENSSL" == "1" ]]; then
-    "$OPENSSL" ca -batch -config "$INT_CNF" -gencrl -crldays "$CRL_DAYS" -out "$TMP_CRL" >/dev/null 2>&1 || true
-  else
-    "$OPENSSL" ca -batch -config "$INT_CNF" -gencrl -crldays "$CRL_DAYS" -out "$TMP_CRL" || true
-  fi
-  install -m 444 "$TMP_CRL" "$INT_DIR/crl/ca.crl.pem"
-  rm -f "$TMP_CRL"
+  publish_crl "$INT_DIR" "$INT_DIR/certs/ca.cert.pem" "$INT_DIR/private/ca.key.pem" "$INT_DIR/crl/ca.crl.pem" -crldays "$CRL_DAYS" \
+    || die "CRL maintenance failed before issuance"
+
 fi
 
 # ---- Preflight: refuse issuing if an active (non-expired, non-revoked) cert already exists for this CN ----
@@ -391,27 +345,11 @@ if [[ "${ALLOW_DUPLICATE_CN:-0}" != "1" ]]; then
   INT_INDEX="$INT_DIR/index.txt"
   [[ -f "$INT_INDEX" ]] || die "Missing intermediate index: $INT_INDEX"
 
-  # Current UTC time in OpenSSL index format (YYMMDDHHMMSSZ)
-  NOW_YYMMDDHHMMSSZ="$(date -u +%y%m%d%H%M%SZ 2>/dev/null || date +%y%m%d%H%M%SZ)"
-
-  # Use US (0x1F) as delimiter to preserve tabs/spaces in subject when piping to read
   DUPS_TMP="$(mktemp -t dupcn.XXXXXX || mktemp)"
-  awk -v now="$NOW_YYMMDDHHMMSSZ" -v cn="$CN" -v US="$(printf '\x1f')" 'BEGIN{FS="\t"}
-    /^[[:space:]]*$/ || $1 ~ /^#/ { next }
-    {
-      status=$1; expiry=$2; serial=$4; filename=$5;
-      subj = (NF>=6 ? $6 : "");
-      for (i=7; i<=NF; i++) subj = subj "\t" $i;
-
-      # Active if status==V and expiry > now (string compare OK for YYMMDDHHMMSSZ)
-      if (status=="V" && expiry > now) {
-        # Exact CN match: /CN=<cn> followed by "/" or end of string
-        if (subj ~ ("(/CN=" cn "(/|$))")) {
-          printf "%s%s%s\n", serial, US, filename;
-        }
-      }
-    }
-  ' "$INT_INDEX" > "$DUPS_TMP"
+  if ! pki_records duplicates "$INT_INDEX" > "$DUPS_TMP"; then
+    rm -f "$DUPS_TMP"
+    die "Cannot safely select duplicate CNs from $INT_INDEX"
+  fi
 
   # Iterate without mapfile (Bash 3.2): while-read over the temp file
   found=0
@@ -438,33 +376,41 @@ if [[ "${ALLOW_DUPLICATE_CN:-0}" != "1" ]]; then
 fi
 
 # ---- Private key ----
+CANON_LEAF_KEY=""
+recovery_start "leaf authority=$INT_DIR CN=$CN"
+recovery_note "key=$KEY_PATH csr=$CSR_PATH certificate=$CRT_PATH"
+claim_leaf_name
 # Si FORCE_NEW_KEY=1 et une clé existe, on la sauvegarde puis on régénère.
 if [[ -s "$KEY_PATH" && "${FORCE_NEW_KEY:-0}" == "1" ]]; then
   ts="$(date +%Y%m%d%H%M%S 2>/dev/null || date +%s)"
-  bak="${KEY_PATH%.key.pem}.key.${ts}.bak.pem"
+  bak="${KEY_PATH%.key.pem}.key.${ts}.$$.bak.pem"
+  authority_path "$INT_DIR" "$ROOT_DIR/$bak" >/dev/null
   info "FORCE_NEW_KEY=1 → previous key backup to: $bak"
-  # Sauvegarde avec permissions strictes (600). install si possible, fallback cp.
-  if install -m 0600 "$KEY_PATH" "$bak" 2>/dev/null; then
-    :
-  else
-    cp -p "$KEY_PATH" "$bak"
-    chmod 600 "$bak" 2>/dev/null || true
-  fi
+  staged_install "$KEY_PATH" "$bak" 600
+  CANON_LEAF_KEY="$KEY_PATH"
+  KEY_PATH="$(mktemp "$INT_DIR/private/.replacement.XXXXXX")"
+  recovery_note "old_key=$CANON_LEAF_KEY backup=$bak staged_key=$KEY_PATH"
 
-  # Détruire l’ancienne clé avant régénération (secure delete si dispo)
-  if command -v shred >/dev/null 2>&1; then
-    shred -u "$KEY_PATH" || rm -f "$KEY_PATH"
-  else
-    rm -f "$KEY_PATH"
-  fi
 fi
 
 # En mode rotate, le KEY_PATH est déjà suffixé → on génère systématiquement une nouvelle clé si absente
-if [[ ! -s "$KEY_PATH" ]]; then
+if [[ ! -s "$KEY_PATH" || "${FORCE_NEW_KEY:-0}" == 1 ]]; then
   gen_private_key "$KEY_ALG" "$KEY_SIZE" "$KEY_CURVE" "$KEY_PATH"
   chmod 600 "$KEY_PATH" 2>/dev/null || true
 else
   info "Leaf private key already exists: $KEY_PATH (skip)"
+fi
+
+inspect_private_key_metadata "$KEY_PATH"
+[[ "$DETECTED_KEY_ALG" == "$effective_alg" ]] || die "Effective leaf key changed during issuance"
+select_leaf_policy "$DETECTED_KEY_ALG"
+LEAF_POLICY_SHA256="$("$OPENSSL" dgst -sha256 "$INT_CNF" | awk '{print $NF}')"
+policy_archive="$(authority_path "$INT_DIR" "policies/$LEAF_POLICY_SHA256.cnf")"
+if [[ -e "$policy_archive" ]]; then
+  [[ "$("$OPENSSL" dgst -sha256 "$policy_archive" | awk '{print $NF}')" == "$LEAF_POLICY_SHA256" ]] || die "Policy archive hash mismatch: $policy_archive"
+else
+  mkdir -p "$(dirname "$policy_archive")"
+  install -m 444 "$INT_CNF" "$policy_archive"
 fi
 
 # ---- Build a transient req config with DN and SAN ----
@@ -500,8 +446,8 @@ if [[ -n "$SAN_DNS" || -n "$SAN_IP" || -n "$SAN_EMAIL" || -n "${SAN_URI:-}" ]]; 
     IFS=',' read -r -a _dns <<< "$SAN_DNS"
     for d in "${_dns[@]}"; do
       d="$(trim_spaces "$d")"; [[ -z "$d" ]] && continue
-      printf "DNS.%d = %s\n" "$idx" "$d" >> "$REQ_CNF_DN"
-      ((idx++))
+      printf "DNS.%d = %s\n" "$idx" "$(cnf_quote "$d")" >> "$REQ_CNF_DN"
+      idx=$((idx + 1))
     done
   fi
 
@@ -510,8 +456,8 @@ if [[ -n "$SAN_DNS" || -n "$SAN_IP" || -n "$SAN_EMAIL" || -n "${SAN_URI:-}" ]]; 
     IFS=',' read -r -a _ips <<< "$SAN_IP"
     for ip in "${_ips[@]}"; do
       ip="$(trim_spaces "$ip")"; [[ -z "$ip" ]] && continue
-      printf "IP.%d = %s\n" "$idx" "$ip" >> "$REQ_CNF_DN"
-      ((idx++))
+      printf "IP.%d = %s\n" "$idx" "$(cnf_quote "$ip")" >> "$REQ_CNF_DN"
+      idx=$((idx + 1))
     done
   fi
 
@@ -520,8 +466,8 @@ if [[ -n "$SAN_DNS" || -n "$SAN_IP" || -n "$SAN_EMAIL" || -n "${SAN_URI:-}" ]]; 
     IFS=',' read -r -a _mails <<< "$SAN_EMAIL"
     for em in "${_mails[@]}"; do
       em="$(trim_spaces "$em")"; [[ -z "$em" ]] && continue
-      printf "email.%d = %s\n" "$idx" "$em" >> "$REQ_CNF_DN"
-      ((idx++))
+      printf "email.%d = %s\n" "$idx" "$(cnf_quote "$em")" >> "$REQ_CNF_DN"
+      idx=$((idx + 1))
     done
   fi
 
@@ -530,8 +476,8 @@ if [[ -n "$SAN_DNS" || -n "$SAN_IP" || -n "$SAN_EMAIL" || -n "${SAN_URI:-}" ]]; 
     IFS=',' read -r -a _uris <<< "$SAN_URI"
     for u in "${_uris[@]}"; do
       u="$(trim_spaces "$u")"; [[ -z "$u" ]] && continue
-      printf "URI.%d = %s\n" "$idx" "$u" >> "$REQ_CNF_DN"
-      ((idx++))
+      printf "URI.%d = %s\n" "$idx" "$(cnf_quote "$u")" >> "$REQ_CNF_DN"
+      idx=$((idx + 1))
     done
   fi
 fi
@@ -565,7 +511,8 @@ info "Next leaf serial (preview): ${_next_hex}"
 unset _next_hex
 
 # ---- Sign with intermediate into a temp file ----
-TMPCRT="$INT_DIR/certs/.tmp.$(date +%s).$$.pem"
+TMPCRT="$(mktemp "$INT_DIR/certs/.tmp.XXXXXX")"
+recovery_signing "$INT_DIR" "$TMPCRT"
 info "Signing leaf via intermediate '$INT_DIR' for ${DAYS} days (extensions: ${EXT_SECTION})…"
 if [[ "$QUIET_OPENSSL" == "1" ]]; then
   "$OPENSSL" ca -batch \
@@ -600,15 +547,33 @@ if [[ -n "$SERIAL_HEX_ACTUAL" && -f "$INT_INDEX" ]]; then
     "$INT_INDEX" > "$INT_INDEX.tmp" && mv "$INT_INDEX.tmp" "$INT_INDEX"
 fi
 
+recovery_phase "issuance-committed serial=$SERIAL_HEX_ACTUAL"
+bind_leaf "$INT_DIR" "$TMPCRT" "$CURRENT_ISSUER_ID"
+policy_record="$(authority_path "$INT_DIR" "issuers/$SERIAL_HEX_ACTUAL.policy")"
+[[ ! -e "$policy_record" ]] || die "Existing leaf policy record: $policy_record"
+policy_tmp="$(mktemp "$INT_DIR/issuers/.policy.XXXXXX")"
+printf 'SCHEMA=1\nPOLICY_SHA256=%s\nEXT_SECTION=%s\nALG=%s\n' "$LEAF_POLICY_SHA256" "$EXT_SECTION" "$DETECTED_KEY_ALG" > "$policy_tmp"
+staged_install "$policy_tmp" "$policy_record"
+rm -f "$policy_tmp"
+
 # ---- If destination exists, suffix with the serial to avoid overwrite ----
 if [[ -e "$CRT_PATH" && -n "$SERIAL_HEX_ACTUAL" ]]; then
-  CRT_PATH="$INT_DIR/certs/${CN}-${SERIAL_HEX_ACTUAL}.cert.pem"
+  CRT_PATH="$INT_DIR/certs/srl-${SERIAL_HEX_ACTUAL}-${ARTIFACT_STEM}.cert.pem"
 fi
 
-# ---- Atomic install to final destination + perms ----
-install -m 0644 "$TMPCRT" "$CRT_PATH"
+# ---- Staged single-file replacement + permissions ----
+authority_path "$INT_DIR" "$ROOT_DIR/$CRT_PATH" >/dev/null
+[[ ! -e "$CRT_PATH" && ! -L "$CRT_PATH" ]] || die "Certificate destination already exists: $CRT_PATH"
+check_pair "$TMPCRT" "$KEY_PATH"
+if [[ -n "$CANON_LEAF_KEY" ]]; then
+  staged_install "$KEY_PATH" "$CANON_LEAF_KEY" 600
+  rm -f "$KEY_PATH"
+  KEY_PATH="$CANON_LEAF_KEY"
+fi
+staged_install "$TMPCRT" "$CRT_PATH"
 rm -f "$TMPCRT"
 chmod 444 "$CRT_PATH"
+recovery_phase certificate-installed
 info "Leaf certificate ready: $CRT_PATH"
 
 # After installing $CRT_PATH and before building the full chain / running verify
@@ -621,10 +586,15 @@ fi
 
 # ---- Rotate: renommer les artefacts en <CN>-<SERIAL> ----
 if [[ "$ROTATE_MODE" == "1" && -n "$SERIAL_HEX_ACTUAL" ]]; then
-  NEW_BASE="${CN}-${SERIAL_HEX_ACTUAL}"
+  NEW_BASE="srl-${SERIAL_HEX_ACTUAL}-${ARTIFACT_STEM}"
   NEW_KEY="$INT_DIR/private/${NEW_BASE}.key.pem"
   NEW_CRT="$INT_DIR/certs/${NEW_BASE}.cert.pem"
   NEW_CSR="$INT_DIR/csr/${NEW_BASE}.csr.pem"
+
+  for output in "$NEW_KEY" "$NEW_CRT" "$NEW_CSR"; do
+    authority_path "$INT_DIR" "$ROOT_DIR/$output" >/dev/null
+    [[ ! -e "$output" && ! -L "$output" ]] || die "Rotated destination already exists: $output"
+  done
 
   # Renommer si les chemins actuels diffèrent
   [[ "$KEY_PATH" != "$NEW_KEY" && -f "$KEY_PATH" ]] && mv -f "$KEY_PATH" "$NEW_KEY"
@@ -639,15 +609,19 @@ fi
 
 # ---- Full chain next to the cert (optional but handy) ----
 CHAIN_PATH="${CRT_PATH%.cert.pem}.fullchain.cert.pem"
+authority_path "$INT_DIR" "$ROOT_DIR/$CHAIN_PATH" >/dev/null
 if [[ -f "$INT_DIR/certs/ca.cert.pem" ]]; then
-  cat "$CRT_PATH" "$INT_DIR/certs/ca.cert.pem" > "$CHAIN_PATH"
-  chmod 444 "$CHAIN_PATH"
+  chain_tmp="$(mktemp "$INT_DIR/certs/.chain.XXXXXX")"
+  cat "$CRT_PATH" "$INT_DIR/certs/ca.cert.pem" > "$chain_tmp"
+  staged_install "$chain_tmp" "$CHAIN_PATH"
+  rm -f "$chain_tmp"
   info "Full chain ready: $CHAIN_PATH"
 fi
 
 # ---------------------------
 # Tests d’intégrité post-émission (LEAF)
 # ---------------------------
+recovery_phase post-verification
 INT_CRT="${INT_DIR}/certs/ca.cert.pem"
 ROOT_CRT="root/certs/ca.cert.pem"
 
@@ -662,3 +636,5 @@ if [[ -s "$CRT_PATH" ]]; then
     die  "Vérification de chaîne échouée pour le leaf ($CRT_PATH)"
   fi
 fi
+
+recovery_complete

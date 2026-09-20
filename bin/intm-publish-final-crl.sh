@@ -1,141 +1,99 @@
 #!/usr/bin/env bash
-#
-# Certnify — PKI Toolkit © 2025 Bruno Goirand
-# Licensed under MIT (SPDX-License-Identifier: MIT)
-# Part of the Certnify PKI Toolkit — https://github.com/brunogoirand/certnify
-#
+# Advisory final CRL: local generation and remote publication are separate commits.
 set -euo pipefail
-# shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
-
-# ============================================================
-# publish-final-crl.sh
-#
-# Génère et (optionnellement) publie la CRL "finale" pour un
-# intermédiaire : on étend nextUpdate pour laisser une marge,
-# puis on "freeze" (plus de nouvelles CRL prévues).
-#
-# Entrées (env) :
-#   INT_DIR="intm-web-ca"          # sinon KIND=web -> alias intm-web-ca
-#   CRL_DAYS=90                    # durée avant nextUpdate (override default_crl_days)
-#   CRL_HOURS=                     # optionnel (si tu préfères des heures)
-#   OUT_DIR="crl"                  # dossier de sortie relative à INT_DIR
-#   PUBLISH_CMD="rsync -av %FILE% user@host:/var/www/crl/"
-#     - %FILE% sera substitué par chaque fichier généré (PEM, DER, SHA256)
-#
-#   FINAL_MODE=1                   # si 1: refuse si des leafs valides restent (sécurité)
-#   ALLOW_REMAINING_LEAFS=0        # si 1: autorise malgré des leafs encore valides
-#
-# Comportement :
-#   - Vérifie l’intermédiaire et l’index
-#   - Alerte si des leafs valides (status=V) subsistent (et bloque en FINAL_MODE=1)
-#   - Génère la CRL PEM avec -crldays/-crlhours si fournis
-#   - Écrit une version DER + empreintes SHA256
-#   - Met permissions en lecture seule
-#   - (Optionnel) publie via PUBLISH_CMD
-# ============================================================
-
-: "${CRL_DAYS:=90}"
-: "${CRL_HOURS:=}"
-: "${OUT_DIR:=crl}"
-: "${FINAL_MODE:=1}"
-: "${ALLOW_REMAINING_LEAFS:=0}"
-
-# --- Résolution de l'intermédiaire ---
-if [[ -z "${INT_DIR:-}" ]]; then
-  [[ -n "${KIND:-}" ]] || die "Spécifie INT_DIR=... ou KIND=..."
-  INT_DIR="intm-${KIND}-ca"
+: "${CRL_DAYS:=90}"; : "${CRL_HOURS:=}"; : "${OUT_DIR:=crl}"
+: "${FINAL_MODE:=1}"; : "${ALLOW_REMAINING_LEAFS:=0}"; : "${DRY_RUN:=0}"
+for flag in "$FINAL_MODE" "$ALLOW_REMAINING_LEAFS" "$DRY_RUN"; do
+  [[ "$flag" == 0 || "$flag" == 1 ]] || die "Final CRL flags must be 0 or 1"
+done
+pki_plan_or_begin
+if [[ -z "${INT_DIR:-}" ]]; then INT_DIR="intm-${KIND:?INT_DIR or KIND required}-ca"; fi
+INT_DIR="$(resolve_authority "$INT_DIR")"
+check_config "$INT_DIR"
+INT_CRT="$INT_DIR/certs/ca.cert.pem"; INT_KEY="$INT_DIR/private/ca.key.pem"
+check_pair "$INT_CRT" "$INT_KEY"
+output_dir="$(authority_path "$INT_DIR" "$OUT_DIR")"
+remaining="$(pki_records remaining "$INT_DIR/index.txt")"
+info "Unrevoked, unexpired indexed certificates: $remaining (final publication is advisory; issuance and CRL renewal stay enabled)"
+if [[ -z "${FINAL_CRL:-}" && "$FINAL_MODE" == 1 && "$ALLOW_REMAINING_LEAFS" != 1 && "$remaining" -gt 0 ]]; then
+  die "FINAL_MODE=1: $remaining unexpired certificates remain; use ALLOW_REMAINING_LEAFS=1 only after review"
 fi
-
-INT_CNF="${INT_DIR}/openssl.cnf"
-INT_CRT="${INT_DIR}/certs/ca.cert.pem"
-INT_KEY="${INT_DIR}/private/ca.key.pem"
-INDEX="${INT_DIR}/index.txt"
-
-[[ -f "$INT_CNF" ]] || die "Config introuvable: $INT_CNF"
-[[ -f "$INT_CRT" ]] || die "Cert intermédiaire introuvable: $INT_CRT"
-[[ -f "$INT_KEY" ]] || die "Clé privée intermédiaire introuvable: $INT_KEY"
-[[ -f "$INDEX"  ]] || die "index.txt introuvable: $INDEX"
-
-# --- Statistiques index : V(valid), R(revoked), E(expired) ---
-read -r cntV cntR cntE <<<"$(awk -F'\t' '
-  $1=="V"{v++} $1=="R"{r++} $1=="E"{e++}
-  END{printf "%d %d %d", v+0, r+0, e+0}
-' "$INDEX")"
-
-info "Index status → V=${cntV} (valides), R=${cntR} (révoqués), E=${cntE} (expirés)"
-
-if [[ "$FINAL_MODE" == "1" && "$ALLOW_REMAINING_LEAFS" != "1" && "$cntV" -gt 0 ]]; then
-  die "FINAL_MODE=1 : des leafs valides subsistent (V=${cntV}). Réémets/retire avant la CRL finale ou passe ALLOW_REMAINING_LEAFS=1."
+if [[ -n "${FINAL_CRL:-}" ]]; then
+  CRL_PEM="$(authority_path "$INT_DIR" "$FINAL_CRL")"
+  [[ "$(dirname "$CRL_PEM")" == "$output_dir" && "$(basename "$CRL_PEM")" == ca-*.crl.pem && ! -L "$CRL_PEM" ]] || die "FINAL_CRL must select a versioned PEM in OUT_DIR"
+  validate_crl "$CRL_PEM" "$INT_CRT" || die "Cannot resume an invalid/stale final CRL"
+else
+  duration="${CRL_HOURS:-$CRL_DAYS}"
+  [[ "$duration" =~ ^[0-9]+$ && "$duration" =~ [1-9] ]] || die "CRL duration must be a positive integer"
+  CRL_PEM="$output_dir/ca-$(date -u +%Y%m%d%H%M%SZ)-$$.crl.pem"
+  [[ ! -e "$CRL_PEM" && ! -L "$CRL_PEM" ]] || die "Versioned output exists: $CRL_PEM"
 fi
-
-# --- Dossier sortie CRL ---
-mkdir -p "${INT_DIR}/${OUT_DIR}"
-
-ts="$(date -u +%Y%m%d%H%M%SZ)"
-CRL_PEM="${INT_DIR}/${OUT_DIR}/ca-${ts}.crl.pem"
-CRL_DER="${INT_DIR}/${OUT_DIR}/ca-${ts}.crl"
-CRL_LATEST_PEM="${INT_DIR}/${OUT_DIR}/ca.crl.pem"
-CRL_LATEST_DER="${INT_DIR}/${OUT_DIR}/ca.crl"
-
-# --- Génération CRL ---
-info "Génération CRL finale…"
-gen_args=( -gencrl -config "$INT_CNF" )
-if [[ -n "$CRL_HOURS" ]]; then
-  gen_args+=( -crlhours "$CRL_HOURS" )
-elif [[ -n "$CRL_DAYS" ]]; then
-  gen_args+=( -crldays "$CRL_DAYS" )
+CRL_DER="${CRL_PEM%.pem}"; LATEST_PEM="$output_dir/ca.crl.pem"; LATEST_DER="$output_dir/ca.crl"
+for output in "$CRL_PEM" "$CRL_DER" "$CRL_PEM.sha256" "$CRL_DER.sha256" "$CRL_PEM.publication" "$LATEST_PEM" "$LATEST_DER"; do
+  authority_path "$INT_DIR" "$output" >/dev/null
+  [[ ! -d "$output" ]] || die "Output is a directory: $output"
+done
+if [[ "$DRY_RUN" == 1 ]]; then
+  info "PLAN final_crl=$CRL_PEM resume=${FINAL_CRL:+yes} remote=${PUBLISH_CMD:+configured}; no mutation"
+  exit 0
 fi
-
-"$OPENSSL" ca "${gen_args[@]}" -out "$CRL_PEM" >/dev/null
-
-# --- Conversion DER + empreintes ---
-"$OPENSSL" crl -in "$CRL_PEM" -outform DER -out "$CRL_DER" >/dev/null
-
-sha256_pem="$("$OPENSSL" crl -in "$CRL_PEM" -noout -fingerprint -sha256 | sed 's/^SHA256 Fingerprint=//; s/://g')"
-sha256_der="$("$OPENSSL" dgst -sha256 -binary "$CRL_DER" | openssl base64)"
-
-printf '%s\n' "$sha256_pem" > "${CRL_PEM}.sha256"
-printf '%s\n' "$sha256_der" > "${CRL_DER}.sha256"
-
-chmod 444 "$CRL_PEM" "$CRL_DER" "${CRL_PEM}.sha256" "${CRL_DER}.sha256"
-
-# --- Symlinks "latest" atomiques ---
-ln -sfn "$(basename "$CRL_PEM")" "$CRL_LATEST_PEM"
-ln -sfn "$(basename "$CRL_DER")" "$CRL_LATEST_DER"
-
-# --- Affichage résumé ---
-next_update="$("$OPENSSL" crl -in "$CRL_PEM" -noout -nextupdate | sed 's/^nextUpdate=//')"
-last_update="$("$OPENSSL" crl -in "$CRL_PEM" -noout -lastupdate | sed 's/^lastUpdate=//')"
-
-info "CRL émise: $CRL_PEM"
-info "lastUpdate=$last_update  nextUpdate=$next_update"
-info "DER: $CRL_DER"
-info "SHA256(PEM) écrit dans: ${CRL_PEM}.sha256"
-info "SHA256(DER-binary) écrit dans: ${CRL_DER}.sha256"
-info "Liens: $(basename "$CRL_LATEST_PEM"), $(basename "$CRL_LATEST_DER")"
-
-# --- Publication optionnelle ---
-publish_file() {
-  local f="$1"
-  local cmd="${PUBLISH_CMD//%FILE%/$f}"
-  if [[ -n "${PUBLISH_CMD:-}" ]]; then
-    echo "[PUB] $cmd"
-    bash -c "$cmd"
+mkdir -p "$output_dir"
+local_committed=0
+publication_failure() {
+  local rc="$?"
+  if [[ "$local_committed" == 1 ]]; then
+    warn "Local CRL committed: $CRL_PEM; artifact/publication failure. Resume with INT_DIR=$INT_DIR FINAL_CRL=$CRL_PEM (and the same OUT_DIR/PUBLISH_CMD). No CRL or revocation rollback."
+  else
+    warn "CRL generation failed; inspect crlnumber (it may have advanced). Previous latest artifacts preserved."
   fi
+  exit "$rc"
 }
-
-if [[ -n "${PUBLISH_CMD:-}" ]]; then
-  # Publie PEM, DER et leurs .sha256
-  pushd "${INT_DIR}/${OUT_DIR}" >/dev/null
-  publish_file "$(basename "$CRL_PEM")"
-  publish_file "$(basename "$CRL_DER")"
-  publish_file "$(basename "${CRL_PEM}.sha256")"
-  publish_file "$(basename "${CRL_DER}.sha256")"
-  # (option) publier aussi les symlinks "latest" si le serveur sait les gérer
-  publish_file "$(basename "$CRL_LATEST_PEM")" || true
-  publish_file "$(basename "$CRL_LATEST_DER")" || true
-  popd >/dev/null
+trap publication_failure ERR
+if [[ -z "${FINAL_CRL:-}" ]]; then
+  gen_args=(-crldays "$CRL_DAYS")
+  [[ -z "$CRL_HOURS" ]] || gen_args=(-crlhours "$CRL_HOURS")
+  publish_crl "$INT_DIR" "$INT_CRT" "$INT_KEY" "$CRL_PEM" "${gen_args[@]}"
 fi
-
-info "CRL finale publiée avec succès."
+local_committed=1
+info "Local CRL committed: $CRL_PEM"
+staging="$(mktemp -d "$output_dir/.final.XXXXXX")"
+trap 'rc=$?; rm -rf "${staging:-}"; pki_exit "$rc"' EXIT
+"$OPENSSL" crl -in "$CRL_PEM" -outform DER -out "$staging/crl.der"
+# Both sidecars hash exactly the DER bytes. Preserve the intended legacy encodings:
+# PEM sidecar = uppercase hex; DER sidecar = base64; one LF, no labels/spaces.
+"$OPENSSL" dgst -sha256 -binary "$staging/crl.der" > "$staging/digest"
+od -An -v -tx1 "$staging/digest" | tr -d ' \n' | tr 'a-f' 'A-F' > "$staging/hex"
+printf '\n' >> "$staging/hex"
+"$OPENSSL" base64 -A -in "$staging/digest" > "$staging/base64"
+printf '\n' >> "$staging/base64"
+staged_install "$staging/crl.der" "$CRL_DER"
+staged_install "$staging/hex" "$CRL_PEM.sha256"
+staged_install "$staging/base64" "$CRL_DER.sha256"
+staged_link "$(basename "$CRL_PEM")" "$LATEST_PEM"
+staged_link "$(basename "$CRL_DER")" "$LATEST_DER"
+report="$CRL_PEM.publication"
+printf 'attempt=%s\nlocal=complete\n' "$(date -u +%FT%TZ)" >> "$report"
+if [[ -n "${PUBLISH_CMD:-}" ]]; then
+  failed=0
+  cd "$output_dir"
+  for output in "$CRL_PEM" "$CRL_DER" "$CRL_PEM.sha256" "$CRL_DER.sha256" "$LATEST_PEM" "$LATEST_DER"; do
+    file="$(basename "$output")"
+    # Only generated basenames enter this trusted operator-supplied shell command.
+    command="${PUBLISH_CMD//%FILE%/$file}"
+    if bash -c "$command"; then
+      printf 'artifact=%s status=published\n' "$file" | tee -a "$report"
+    else
+      printf 'artifact=%s status=failed\n' "$file" | tee -a "$report" >&2
+      failed=$((failed+1))
+    fi
+  done
+  if [[ "$failed" != 0 ]]; then
+    warn "Local CRL committed; $failed remote artifacts failed. Resume with INT_DIR=$INT_DIR FINAL_CRL=$CRL_PEM and the same OUT_DIR/PUBLISH_CMD. Receipt: $report"
+    exit 1
+  fi
+  info "All six CRL artifacts published successfully"
+else
+  printf 'remote=not-requested\n' >> "$report"
+  info "Final CRL prepared locally; remote publication not requested"
+fi

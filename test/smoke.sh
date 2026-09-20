@@ -52,42 +52,43 @@ assert_cert_text_not_contains() {
 }
 
 require_cmd "$OPENSSL"
-require_cmd tar
+require_cmd python3
 require_cmd mktemp
 require_cmd make
 
-WORKDIR="$(mktemp -d "$TMPDIR_ROOT/certnify-smoke.XXXXXX")"
-trap 'rm -rf "$WORKDIR"' EXIT
-
+# Copy only explicitly listed sources; never read operational PKI directories.
+SESSION_DIR="$(mktemp -d "$TMPDIR_ROOT/certnify-smoke.XXXXXX")"
+trap 'rm -rf "$SESSION_DIR"' EXIT
+umask 077
+WORKDIR="$SESSION_DIR/main"
+python3 "$ROOT_DIR/test/workspace.py" copy "$ROOT_DIR" "$WORKDIR"
 info "Workspace: $WORKDIR"
-
-cp -R "$ROOT_DIR/." "$WORKDIR"
-rm -rf \
-  "$WORKDIR/.git" \
-  "$WORKDIR/root" \
-  "$WORKDIR"/intm-* \
-  "$WORKDIR/draft" \
-  "$WORKDIR/plan" \
-  "$WORKDIR/test-results"
-
+info "Shell: $BASH_VERSION; backend: $($OPENSSL version)"
 cd "$WORKDIR"
+
+fixture_make() {
+  local snapshot_dir rc
+  snapshot_dir="$(mktemp -d "$SESSION_DIR/snapshot.XXXXXX")"
+  python3 "$ROOT_DIR/test/workspace.py" snapshot "$PWD" "$snapshot_dir/before.json"
+  # Do not inherit live CA paths, Make flags, or profile overrides.
+  rc=0
+  env -i PATH="$PATH" TMPDIR="$TMPDIR_ROOT" OPENSSL="$OPENSSL" \
+    LC_ALL=C make "$@" || rc=$?
+  python3 "$ROOT_DIR/test/workspace.py" snapshot "$PWD" "$snapshot_dir/after.json"
+  if [[ "$rc" != 0 ]]; then
+    echo "[ERR] make failed (rc=$rc); fixture state delta:" >&2
+    python3 "$ROOT_DIR/test/workspace.py" diff "$snapshot_dir/before.json" "$snapshot_dir/after.json" >&2
+    return "$rc"
+  fi
+}
 
 run_make() {
   info "make $*"
-  make "$@" >/dev/null
+  fixture_make "$@" >/dev/null
 }
 
 clone_workspace() {
-  local target="$1"
-  mkdir -p "$target"
-  cp -R "$ROOT_DIR/." "$target"
-  rm -rf \
-    "$target/.git" \
-    "$target/root" \
-    "$target"/intm-* \
-    "$target/draft" \
-    "$target/plan" \
-    "$target/test-results"
+  python3 "$ROOT_DIR/test/workspace.py" copy "$ROOT_DIR" "$1"
 }
 
 run_make root CN="Smoke Root CA"
@@ -134,24 +135,24 @@ assert_cert_text_contains "intm-archive-ca/certs/Smoke Timestamp Authority.cert.
 assert_cert_text_contains "intm-archive-ca/certs/Smoke Timestamp Authority.cert.pem" "Digital Signature, Non Repudiation" "timestamping key usage"
 assert_cert_text_contains "intm-archive-ca/certs/Smoke Archive Alias TSA.cert.pem" "Time Stamping" "archive alias timestamping EKU"
 
-verify_output="$(make verify KIND=web CN="app.example.test" 2>&1)" || die "make verify failed"
+verify_output="$(fixture_make verify KIND=web CN="app.example.test" 2>&1)" || die "make verify failed"
 assert_contains "$verify_output" "VERIFY STATUS: OK" "verify output"
 
-dup_output="$(make server CN="app.example.test" 2>&1 || true)"
+dup_output="$(fixture_make server CN="app.example.test" 2>&1 || true)"
 assert_contains "$dup_output" "Refusing to issue: active certificate(s) for CN='app.example.test' already exist" "duplicate CN refusal"
 
+run_make crl-root
 run_make revoke KIND=web CN="app.example.test" REASON="cessationOfOperation"
-verify_revoked="$(make verify KIND=web CN="app.example.test" VERIFY_CRL=1 VERIFY_MODE=info 2>&1)" || die "verify revoked failed"
+verify_revoked="$(fixture_make verify KIND=web CN="app.example.test" VERIFY_CRL=1 VERIFY_MODE=info 2>&1)" || die "verify revoked failed"
 assert_contains "$verify_revoked" "VERIFY STATUS: REVOKED" "revoked verify output"
 
-run_make crl-root
-revoked_int_output="$(make verify-intermediate-revoked KIND=web 2>&1 || true)"
+revoked_int_output="$(fixture_make verify-intermediate-revoked KIND=web 2>&1 || true)"
 assert_contains "$revoked_int_output" "OK" "verify-intermediate-revoked command wiring"
 
-rollback_preview="$(make -n rollback-web)"
+rollback_preview="$(fixture_make -n rollback-web)"
 assert_contains "$rollback_preview" "bin/intm-rollback-to-legacy.sh" "rollback recipe"
 
-EDDSA_CASE="$(mktemp -d "$TMPDIR_ROOT/certnify-root-eddsa.XXXXXX")"
+EDDSA_CASE="$(mktemp -d "$SESSION_DIR/certnify-root-eddsa.XXXXXX")"
 clone_workspace "$EDDSA_CASE"
 (
   cd "$EDDSA_CASE"
@@ -164,7 +165,7 @@ clone_workspace "$EDDSA_CASE"
   assert_not_contains "$eddsa_meta" "KEY_SIZE=4096" "root metadata stale rsa size"
 )
 
-PATHLEN_CASE="$(mktemp -d "$TMPDIR_ROOT/certnify-root-pathlen.XXXXXX")"
+PATHLEN_CASE="$(mktemp -d "$SESSION_DIR/certnify-root-pathlen.XXXXXX")"
 clone_workspace "$PATHLEN_CASE"
 (
   cd "$PATHLEN_CASE"
@@ -175,7 +176,7 @@ clone_workspace "$PATHLEN_CASE"
   assert_cert_text_not_contains "root/certs/ca.cert.pem" "Path Length Constraint" "root certificate pathlen omission"
 )
 
-CUSTOM_CNF_CASE="$(mktemp -d "$TMPDIR_ROOT/certnify-root-cnf.XXXXXX")"
+CUSTOM_CNF_CASE="$(mktemp -d "$SESSION_DIR/certnify-root-cnf.XXXXXX")"
 clone_workspace "$CUSTOM_CNF_CASE"
 (
   cd "$CUSTOM_CNF_CASE"
@@ -183,7 +184,7 @@ clone_workspace "$CUSTOM_CNF_CASE"
   assert_file "custom/root.cnf"
 )
 
-INTM_REKEY_CASE="$(mktemp -d "$TMPDIR_ROOT/certnify-intm-rekey.XXXXXX")"
+INTM_REKEY_CASE="$(mktemp -d "$SESSION_DIR/certnify-intm-rekey.XXXXXX")"
 clone_workspace "$INTM_REKEY_CASE"
 (
   cd "$INTM_REKEY_CASE"
@@ -198,7 +199,7 @@ clone_workspace "$INTM_REKEY_CASE"
   assert_contains "$rekey_meta" "KEY_CURVE=secp384r1" "intermediate metadata effective curve after rekey"
 )
 
-INTM_REVOKE_CASE="$(mktemp -d "$TMPDIR_ROOT/certnify-intm-revoke.XXXXXX")"
+INTM_REVOKE_CASE="$(mktemp -d "$SESSION_DIR/certnify-intm-revoke.XXXXXX")"
 clone_workspace "$INTM_REVOKE_CASE"
 (
   cd "$INTM_REVOKE_CASE"
@@ -211,13 +212,13 @@ clone_workspace "$INTM_REVOKE_CASE"
   [[ "$serial_before" != "$serial_after" ]] || die "Intermediate serial did not change after revoked intermediate reissue"
 )
 
-INTM_PATH_CASE="$(mktemp -d "$TMPDIR_ROOT/certnify-intm-path.XXXXXX")"
+INTM_PATH_CASE="$(mktemp -d "$SESSION_DIR/certnify-intm-path.XXXXXX")"
 clone_workspace "$INTM_PATH_CASE"
 (
   cd "$INTM_PATH_CASE"
   run_make root CN="Path Root"
-  invalid_path_output="$(make intermediate INT_DIR="../escape" CN="Escape CA" 2>&1 || true)"
-  assert_contains "$invalid_path_output" "INT_DIR must stay within the workspace" "unsafe INT_DIR rejection"
+  invalid_path_output="$(fixture_make intermediate INT_DIR="../escape" CN="Escape CA" 2>&1 || true)"
+  assert_contains "$invalid_path_output" "Path must stay within the workspace" "unsafe INT_DIR rejection"
 )
 
 info "Smoke test passed"

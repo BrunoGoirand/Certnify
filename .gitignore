@@ -7,14 +7,19 @@ Thumbs.db
 *.tmp
 *.log
 
-# --- Build / dist ---
-plan/
-root/
-intm-web-ca/
-intm-auth-ca/
-intm-code-ca/
-intm-smime-ca/
-intm-archive-ca/
+# --- Generated PKI data (workspace-relative authority locations) ---
+/root/
+/intm-*/
+/intermediate/
+/pki-data/
+/out/
+/.locks/
+/test-results/
+# Defense in depth for keys stored outside the conventional data directories.
+private/
+*.key.pem
+*.key.*.pem
+*.key.*.bak
 
 # --- IDE ---
 .vscode/
@@ -29,3 +34,6 @@ intm-archive-ca/
 
 # --- Répertoire draft (non versionné) ---
 draft/
+
+# Interrupted-operation journals and manual recovery reviews.
+/.recovery/

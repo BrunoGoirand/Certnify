@@ -94,13 +94,14 @@
 set -euo pipefail
 # shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
+pki_begin
 
 REQ_CNF=""
 cleanup() {
   [[ -n "$REQ_CNF" ]] && rm -f "$REQ_CNF"
-  release_locks
+  return 0
 }
-trap cleanup EXIT
+trap 'rc=$?; cleanup; pki_exit "$rc"' EXIT
 
 # ---------------------------
 # Debug
@@ -137,6 +138,8 @@ KEY_CURVE="$(echo "${KEY_CURVE:-prime256v1}" | sed 's/^[[:space:]]*//;s/[[:space
 KEY_EDDSA="$(echo "${KEY_EDDSA:-Ed25519}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 
 
+normalize_key_request
+
 DN_MAXLEN="${DN_MAXLEN:-128}"
 QUIET_OPENSSL="${QUIET_OPENSSL:-1}"
 
@@ -158,7 +161,7 @@ if [[ -n "${INT_DIR:-}" ]]; then
     KIND="$(kind_from_int_dir "$INT_DIR")"
   fi
 elif [[ -n "${KIND:-}" ]]; then
-  INT_DIR="intm-${KIND}-ca"
+  INT_DIR="$(resolve_authority "intm-${KIND}-ca")"
   ensure_safe_int_dir "$INT_DIR"
 else
   INT_DIR="intermediate"
@@ -182,7 +185,7 @@ C="$(validate_country_iso "$C")"
 cd "$ROOT_DIR"
 acquire_lock "root-ca"
 int_lock_name="$(printf '%s' "$INT_DIR" | tr '/ ' '__')"
-acquire_lock "intm-${int_lock_name}"
+acquire_lock root-ca
 ensure_root_layout "root"
 mkdir -p "$INT_DIR"
 ensure_intermediate_layout "$INT_DIR"
@@ -205,10 +208,15 @@ ROOT_INDEX="$ROOT_DIR/root/index.txt"
 CANON_CERT="$INT_DIR/certs/ca.cert.pem"
 CANON_CHAIN="$INT_DIR/certs/ca.chain.cert.pem"
 
+# Validate both histories before rekeying or invoking a database writer.
+PKI_RECORD_COUNTER="$(cat root/serial)" pki_records serial "$ROOT_INDEX" >/dev/null
+PKI_RECORD_COUNTER="$(cat "$INT_DIR/serial")" pki_records serial "$INT_DIR/index.txt" >/dev/null
+
 # ---------------------------
 # Intermediate private key (with auto rekey if previous intm is revoked)
 # ---------------------------
 KEY_PATH="$INT_DIR/private/ca.key.pem"
+CANON_KEY=""
 needs_rekey=0
 
 # --- Determine whether issuance can be skipped safely ---
@@ -236,24 +244,16 @@ if [[ -f "$CANON_CERT" && -f "$ROOT_INDEX" ]]; then
   fi
 fi
 
-if [[ -s "$KEY_PATH" ]]; then
-  existing_alg=""
-  existing_size=""
-  existing_curve=""
-  existing_eddsa=""
+if [[ -s "$CANON_CERT" ]]; then
+  "$OPENSSL" verify -no_check_time -CAfile "$ROOT_DIR/root/certs/ca.cert.pem" "$CANON_CERT" >/dev/null || die "Existing intermediate issuer mismatch"
+  archive_generation "$INT_DIR"
+  backfill_bindings "$INT_DIR"
+fi
 
-  if "$OPENSSL" rsa -in "$KEY_PATH" -noout >/dev/null 2>&1; then
-    existing_alg="RSA"
-    existing_size="$("$OPENSSL" rsa -in "$KEY_PATH" -text -noout 2>/dev/null | awk -F'[( )]' '/Private-Key:/ {print $3; exit}')"
-  elif "$OPENSSL" ec -in "$KEY_PATH" -noout >/dev/null 2>&1; then
-    existing_alg="EC"
-    existing_curve="$("$OPENSSL" ec -in "$KEY_PATH" -noout -text 2>/dev/null | awk -F': ' '/ASN1 OID:/ {print $2; exit}')"
-    [[ -z "$existing_curve" ]] && existing_curve="$("$OPENSSL" ec -in "$KEY_PATH" -noout -text 2>/dev/null | awk -F': ' '/OID:/ {print $2; exit}')"
-  elif "$OPENSSL" pkey -in "$KEY_PATH" -text -noout 2>/dev/null | grep -q 'ED25519'; then
-    existing_alg="EdDSA"; existing_curve=""; existing_size=""; existing_eddsa="Ed25519"
-  elif "$OPENSSL" pkey -in "$KEY_PATH" -text -noout 2>/dev/null | grep -q 'ED448'; then
-    existing_alg="EdDSA"; existing_curve=""; existing_size=""; existing_eddsa="Ed448"
-  fi
+if [[ -s "$KEY_PATH" ]]; then
+  inspect_private_key_metadata "$KEY_PATH"
+  existing_alg="$DETECTED_KEY_ALG"; existing_size="$DETECTED_KEY_SIZE"
+  existing_curve="$DETECTED_KEY_CURVE"; existing_eddsa="$DETECTED_KEY_EDDSA"
 
 
   want_alg="$KEY_ALG"
@@ -276,7 +276,7 @@ if [[ -s "$KEY_PATH" ]]; then
         fi
         ;;
       EDDSA|ED25519|ED448)
-        if [[ "$existing_alg" != "EdDSA" || ( -n "$existing_eddsa" && "$existing_eddsa" != "$KEY_EDDSA" ) ]]; then
+        if [[ "$existing_alg" != "$KEY_ALG" ]]; then
           needs_rekey=1
         fi
         ;;
@@ -298,8 +298,13 @@ if [[ -s "$KEY_PATH" ]]; then
 
   if [[ "$needs_rekey" == "1" && "$FORCE_REUSE_KEY" != "1" ]]; then
     ts="$(date +%Y%m%d-%H%M%S)"
-    backup="$INT_DIR/private/ca.key.$ts.bak"
-    mv -f "$KEY_PATH" "$backup"
+    backup="$INT_DIR/private/ca.key.$ts.$$.bak"
+    authority_path "$INT_DIR" "$ROOT_DIR/$backup" >/dev/null
+    recovery_start "intermediate authority=$INT_DIR"
+    staged_install "$KEY_PATH" "$backup" 400
+    CANON_KEY="$KEY_PATH"
+    KEY_PATH="$(mktemp "$INT_DIR/private/.replacement.XXXXXX")"
+    recovery_note "old_key=$CANON_KEY backup=$backup staged_key=$KEY_PATH"
     info "Archived previous key to: $backup"
   fi
 fi
@@ -316,9 +321,16 @@ fi
 
 if [[ "$skip_reissue" == "1" ]]; then
   info "Intermediate already exists and is still valid (DN='${HAVE_DN}') — skip. Set FORCE_REISSUE=1 or ROTATE_KEY=1 to reissue."
+  check_pair "$CANON_CERT" "$KEY_PATH"
+  "$OPENSSL" verify -CAfile "$ROOT_DIR/root/certs/ca.cert.pem" "$CANON_CERT" >/dev/null || die "Existing intermediate has an invalid issuer/validity"
+  normalize_ca_artifacts "$INT_DIR"
+  write_ca_meta "$CANON_CERT" "$KEY_PATH" "$INT_DIR/ca.meta" "" "" "" "" "$DAYS" "${KIND:-}" "$INT_DIR" "" "$ROOT_DIR/root/certs/ca.cert.pem"
+  recovery_complete
   exit 0
 fi
 
+recovery_start "intermediate authority=$INT_DIR"
+recovery_note "key=$KEY_PATH certificate=$CANON_CERT"
 if [[ ! -s "$KEY_PATH" ]]; then
   gen_private_key "$KEY_ALG" "$KEY_SIZE" "$KEY_CURVE" "$KEY_PATH"
 else
@@ -345,7 +357,9 @@ fi
 # ---------------------------
 # Sign intermediate with root (v3_intermediate_ca) into a temp file
 # ---------------------------
-TMPCRT="$INT_DIR/certs/.tmp.$(date +%s).$$.pem"
+ensure_serial_monotonic root
+TMPCRT="$(mktemp "$INT_DIR/certs/.tmp.XXXXXX")"
+recovery_signing root "$TMPCRT"
 info "Signing intermediate with root for ${DAYS} days (extensions: v3_intermediate_ca)…"
 if [[ "$QUIET_OPENSSL" == "1" ]]; then
   "$OPENSSL" ca -batch \
@@ -385,6 +399,10 @@ if [[ -n "$SERIAL_HEX_ACTUAL" && -f "$ROOT_INDEX" ]]; then
     "$ROOT_INDEX" > "$ROOT_INDEX.tmp" && mv "$ROOT_INDEX.tmp" "$ROOT_INDEX"
 fi
 
+recovery_phase "issuance-committed serial=$SERIAL_HEX_ACTUAL"
+check_pair "$TMPCRT" "$KEY_PATH"
+"$OPENSSL" verify -CAfile "$ROOT_DIR/root/certs/ca.cert.pem" "$TMPCRT" >/dev/null
+
 # Tag used to archive the previous generation (cert/chain/meta)
 last_archive_tag=""
 
@@ -398,31 +416,43 @@ if [[ -f "$CANON_CERT" ]]; then
 
   if [[ -n "$OLD_SERIAL_HEX" ]]; then
     last_archive_tag="ca-${OLD_SERIAL_HEX}"
-    mv -f "$CANON_CERT"  "$INT_DIR/certs/${last_archive_tag}.cert.pem"
+    authority_path "$INT_DIR" "certs/${last_archive_tag}.cert.pem" >/dev/null
+    authority_path "$INT_DIR" "certs/${last_archive_tag}.chain.cert.pem" >/dev/null
+    staged_install "$CANON_CERT" "$INT_DIR/certs/${last_archive_tag}.cert.pem"
     if [[ -f "$CANON_CHAIN" ]]; then
-      mv -f "$CANON_CHAIN" "$INT_DIR/certs/${last_archive_tag}.chain.cert.pem"
+      staged_install "$CANON_CHAIN" "$INT_DIR/certs/${last_archive_tag}.chain.cert.pem"
     fi
     info "Archived previous intermediate to: ${last_archive_tag}.cert.pem (+ chain)"
   else
     ts="$(date +%Y%m%d-%H%M%S)"
     last_archive_tag="ca.${ts}"
-    mv -f "$CANON_CERT"  "$INT_DIR/certs/${last_archive_tag}.cert.pem"
+    authority_path "$INT_DIR" "certs/${last_archive_tag}.cert.pem" >/dev/null
+    authority_path "$INT_DIR" "certs/${last_archive_tag}.chain.cert.pem" >/dev/null
+    staged_install "$CANON_CERT" "$INT_DIR/certs/${last_archive_tag}.cert.pem"
     if [[ -f "$CANON_CHAIN" ]]; then
-      mv -f "$CANON_CHAIN" "$INT_DIR/certs/${last_archive_tag}.chain.cert.pem"
+      staged_install "$CANON_CHAIN" "$INT_DIR/certs/${last_archive_tag}.chain.cert.pem"
     fi
     info "Archived previous intermediate to: ${last_archive_tag}.cert.pem (+ chain)"
   fi
 fi
 
 # Install new canonical certificate
-install -m 0644 "$TMPCRT" "$CANON_CERT"
+if [[ -n "${CANON_KEY:-}" ]]; then
+  staged_install "$KEY_PATH" "$CANON_KEY" 400
+  rm -f "$KEY_PATH"
+  KEY_PATH="$CANON_KEY"
+fi
+staged_install "$TMPCRT" "$CANON_CERT"
+recovery_phase certificate-installed
 rm -f "$TMPCRT"
 chmod 444 "$CANON_CERT"
 info "Intermediate CA certificate ready: $CANON_CERT"
 
 # Build canonical chain: intermediate + root
-cat "$CANON_CERT" "$ROOT_DIR/root/certs/ca.cert.pem" > "$CANON_CHAIN"
-chmod 444 "$CANON_CHAIN"
+chain_tmp="$(mktemp "$INT_DIR/certs/.chain.XXXXXX")"
+cat "$CANON_CERT" "$ROOT_DIR/root/certs/ca.cert.pem" > "$chain_tmp"
+staged_install "$chain_tmp" "$CANON_CHAIN"
+rm -f "$chain_tmp"
 info "Chain ready: $CANON_CHAIN"
 ensure_serial_monotonic "$INT_DIR"
 
@@ -435,14 +465,14 @@ if [[ -n "$SERIAL_HEX_ACTUAL" ]]; then
 fi
 
 # ---------------------------
-# Écrire le fichier metadata immuable de l'intermédiaire
+# Écrire le fichier metadata en lecture seule de l'intermédiaire
 # ---------------------------
 INT_CERT="$CANON_CERT"
 INT_KEY="$KEY_PATH"
 INT_META="$INT_DIR/ca.meta"
 ROOT_CERT_PATH="$ROOT_DIR/root/certs/ca.cert.pem"
 
-# Write fresh metadata (make sure write_ca_meta uses atomic install; see pki-env.sh patch)
+# Write fresh metadata with a same-directory staged rename
 write_ca_meta \
   "$INT_CERT" "$INT_KEY" "$INT_META" \
   "$KEY_ALG" "$KEY_SIZE" "$KEY_CURVE" "$KEY_EDDSA" \
@@ -468,6 +498,7 @@ if [[ -f "$DISABLED_FLAG" ]]; then
 fi
 
 # --- Résoudre DIR de façon sûre (set -u safe) ---
+DIR="$INT_DIR"
 if [[ -z "${DIR:-}" ]]; then
   if [[ -n "${INT_DIR:-}" ]]; then
     DIR="$INT_DIR"
@@ -498,5 +529,10 @@ fi
 
 # Legacy alias for older tooling: point to the canonical chain.
 CHAIN_PATH="$DIR/certs/chain.cert.pem"
-ln -sfn "ca.chain.cert.pem" "$CHAIN_PATH"
+staged_link "ca.chain.cert.pem" "$CHAIN_PATH"
 info "Legacy chain alias refreshed: $CHAIN_PATH -> ca.chain.cert.pem"
+
+archive_generation "$INT_DIR"
+normalize_ca_artifacts "$INT_DIR"
+
+recovery_complete

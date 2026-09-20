@@ -1,90 +1,45 @@
 #!/usr/bin/env bash
-#
-# Certnify — PKI Toolkit © 2025 Bruno Goirand
-# Licensed under MIT (SPDX-License-Identifier: MIT)
-# Part of the Certnify PKI Toolkit — https://github.com/brunogoirand/certnify
-#
+# Certnify — controlled directory rollback (MIT).
 set -euo pipefail
-# shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
-
-# ------------------------------------------------------------
-# Rollback vers un intermédiaire LEGACY (modèle SANS symlink)
-# - Renomme l'actif intm-<KIND>-ca -> intm-<KIND>-ca-pre-rollback-<ts>
-# - Remet en place le legacy choisi (ou le plus récent) en tant qu'actif
-#
-# Entrées (env) :
-#   KIND=web|auth|code|smime|archive     (si LEGACY_DIR n'est pas donné)
-#   LEGACY_DIR=intm-<kind>-ca-legacy-<TS> (optionnel; si non fourni → prend le plus récent)
-# ------------------------------------------------------------
-
-# --- Helpers ---
-ts_now() { date +%Y%m%d%H%M%S; }
-
-# --- Résolution LEGACY_DIR / KIND ---
-LEGACY_DIR="${LEGACY_DIR:-}"
-KIND="${KIND:-}"
-
-if [[ -z "$LEGACY_DIR" ]]; then
-  [[ -n "$KIND" ]] || die "Spécifie KIND=web|auth|code|smime|archive (ou LEGACY_DIR=...)."
-  # Trouve le legacy le plus récent
+pki_begin
+check_config root
+if [[ -z "${LEGACY_DIR:-}" ]]; then
+  : "${KIND:?KIND required}"
   shopt -s nullglob
-  legacy_dirs=("intm-${KIND}-ca-legacy-"*)
+  candidates=("intm-${KIND}-ca-legacy-"*)
   shopt -u nullglob
-  latest_legacy="$(printf '%s\n' "${legacy_dirs[@]}" | sort -r | head -n1 || true)"
-  [[ -n "$latest_legacy" ]] || die "Aucun legacy trouvé pour KIND='${KIND}'."
-  LEGACY_DIR="$latest_legacy"
-else
-  # Si LEGACY_DIR est fourni, essaie d'inférer KIND
-  if [[ -z "$KIND" ]]; then
-    # Extrait le kind depuis le nom intm-<kind>-ca-legacy-<TS>
-    base="$(basename "$LEGACY_DIR")"
-    KIND="$(printf '%s\n' "$base" | sed -n 's/^intm-\([^/]*\)-ca-legacy-.*/\1/p')"
-    [[ -n "$KIND" ]] || die "Impossible d'inférer KIND depuis LEGACY_DIR='${LEGACY_DIR}'. Spécifie KIND=..."
-  fi
+  (( ${#candidates[@]} )) || die "No legacy authority for $KIND"
+  LEGACY_DIR="$(printf '%s\n' "${candidates[@]}" | sort -r | head -n1)"
+  [[ -n "$LEGACY_DIR" ]] || die "No legacy authority for $KIND"
 fi
-
-ACTIVE_DIR="intm-${KIND}-ca"
-
-# --- Sanity checks ---
-[[ -d "$LEGACY_DIR" ]] || die "LEGACY_DIR introuvable: ${LEGACY_DIR}"
-[[ -f "${LEGACY_DIR}/openssl.cnf" ]] || die "openssl.cnf manquant dans ${LEGACY_DIR}."
-
-# --- Plan d'action ---
-echo "[OK ] Rollback KIND='${KIND}'"
-echo "[OK ]   LEGACY_DIR : ${LEGACY_DIR}"
-echo "[OK ]   ACTIVE_DIR : ${ACTIVE_DIR}"
-
-# 1) Sauvegarder l'actif courant s'il existe
+LEGACY_DIR="$(resolve_authority "$LEGACY_DIR")"
+if [[ -z "${KIND:-}" ]]; then KIND="$(basename "$LEGACY_DIR" | sed -n 's/^intm-\(.*\)-ca-legacy-.*/\1/p')"; fi
+: "${KIND:?Cannot infer KIND}"
+ACTIVE_DIR="$(resolve_authority "intm-${KIND}-ca")"
+[[ "$ACTIVE_DIR" == "intm-${KIND}-ca" && "$LEGACY_DIR" != "$ACTIVE_DIR" && ! -L "$ACTIVE_DIR" ]] || die "Invalid rollback directory roles"
+check_config "$LEGACY_DIR"
+check_pair "$LEGACY_DIR/certs/ca.cert.pem" "$LEGACY_DIR/private/ca.key.pem"
+"$OPENSSL" verify -no_check_time -CAfile root/certs/ca.cert.pem "$LEGACY_DIR/certs/ca.cert.pem" >/dev/null
+archive_generation "$LEGACY_DIR"
+backfill_bindings "$LEGACY_DIR"
 if [[ -e "$ACTIVE_DIR" ]]; then
-  backup="${ACTIVE_DIR}-pre-rollback-$(ts_now)"
+  check_config "$ACTIVE_DIR"
+  check_pair "$ACTIVE_DIR/certs/ca.cert.pem" "$ACTIVE_DIR/private/ca.key.pem"
+  tag="$(date +%Y%m%d%H%M%S)"; backup="${ACTIVE_DIR}-pre-rollback-$tag"; n=0
+  while [[ -e "$backup" || -L "$backup" ]]; do n=$((n+1)); backup="${ACTIVE_DIR}-pre-rollback-$tag-$n"; done
+  recovery_start "intm-rollback-to-legacy"
+  recovery_note "$ACTIVE_DIR" "$backup"
+  recovery_phase directory-move-outcome-uncertain
   mv "$ACTIVE_DIR" "$backup"
-  echo "[OK ] Actif courant préservé : ${backup}"
-else
-  echo "[.. ] Aucun actif courant ('${ACTIVE_DIR}') — rien à préserver."
+  rebind_config "$backup" "$ROOT_DIR/$ACTIVE_DIR"
+  normalize_ca_artifacts "$backup"
 fi
-
-# 2) Remettre le legacy en actif
+recovery_start "intm-rollback-to-legacy"
+recovery_note "$LEGACY_DIR" "$ACTIVE_DIR"
+recovery_phase directory-move-outcome-uncertain
 mv "$LEGACY_DIR" "$ACTIVE_DIR"
-echo "[OK ] Legacy remis en actif : ${ACTIVE_DIR}"
-
-# 3) Petites vérifs post-move
-[[ -f "${ACTIVE_DIR}/openssl.cnf" ]] || die "Rollback incomplet : ${ACTIVE_DIR}/openssl.cnf manquant."
-[[ -f "${ACTIVE_DIR}/certs/ca.cert.pem" ]] || warn "Attention : ${ACTIVE_DIR}/certs/ca.cert.pem manquant."
-[[ -f "${ACTIVE_DIR}/certs/chain.cert.pem" ]] || warn "Attention : ${ACTIVE_DIR}/certs/chain.cert.pem manquant."
-
-# --- Vérifie la présence de la chaîne complète ---
-CHAIN_PATH="${ACTIVE_DIR}/certs/chain.cert.pem"
-if [[ ! -f "$CHAIN_PATH" ]]; then
-  ROOT_CERT="root/certs/ca.cert.pem"
-  CA_CERT="${ACTIVE_DIR}/certs/ca.cert.pem"
-  if [[ -f "$CA_CERT" && -f "$ROOT_CERT" ]]; then
-    cat "$CA_CERT" "$ROOT_CERT" > "$CHAIN_PATH"
-    chmod 444 "$CHAIN_PATH"
-    info "Chaîne recréée automatiquement : $CHAIN_PATH"
-  else
-    warn "Attention : ${CHAIN_PATH} manquant et impossible à régénérer (root ou cert intermédiaire absent)."
-  fi
-fi
-
-echo "[OK ] Rollback terminé."
+rebind_config "$ACTIVE_DIR" "$ROOT_DIR/$LEGACY_DIR"
+normalize_ca_artifacts "$ACTIVE_DIR"
+info "Restored $ACTIVE_DIR (revocation and disabled state retained)"
+recovery_complete

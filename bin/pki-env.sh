@@ -5,6 +5,9 @@
 # Part of the Certnify PKI Toolkit — https://github.com/brunogoirand/certnify
 #
 set -euo pipefail
+# Re-sourcing within a lifecycle transaction must retain its owned lock.
+if declare -F pki_begin >/dev/null; then return 0; fi
+PKI_CALL_DIR="$(pwd -P)"
 
 # ============================================
 #  Shared helpers for the PKI toolkit (root+int)
@@ -33,11 +36,17 @@ acquire_lock() {
   local timeout="${2:-$LOCK_TIMEOUT}"
   local lock_root="$ROOT_DIR/.locks"
   local lock_dir="${lock_root}/${lock_name}.lock"
-  local waited=0
+  local waited=0 held i
+  for ((i=0; i<${#__CERTNIFY_LOCK_DIRS[@]}; i++)); do
+    held="${__CERTNIFY_LOCK_DIRS[$i]}"
+    [[ "$held" == "$lock_dir" ]] && return 0
+  done
+  [[ "$timeout" =~ ^[0-9]+$ ]] || die "Invalid LOCK_TIMEOUT: $timeout"
+  [[ ! -L "$lock_root" && ! -L "$lock_dir" ]] || die "Symlinked lock path: $lock_dir"
 
   mkdir -p "$lock_root"
   while ! mkdir "$lock_dir" 2>/dev/null; do
-    (( waited >= timeout )) && die "Timeout while waiting for lock: $lock_name"
+    (( waited >= timeout )) && die "Timeout waiting for $lock_dir; inspect pid/owner and confirm no process is active before manual recovery (locks are never stolen)"
     sleep 1
     waited=$((waited + 1))
   done
@@ -104,6 +113,12 @@ canonicalize_path_allow_missing() {
   local missing_suffix=""
   local probe=""
   local resolved=""
+  local hops=0 link
+  while [[ -L "$target" ]]; do
+    hops=$((hops+1)); (( hops <= 40 )) || die "Symlink cycle: $target"
+    link="$(readlink "$target")"
+    if [[ "$link" == /* ]]; then target="$link"; else target="$(dirname "$target")/$link"; fi
+  done
 
   [[ -n "$target" ]] || die "canonicalize_path_allow_missing: path is required"
 
@@ -179,18 +194,7 @@ append_alias_section_from_existing() {
 
 # --- helpers ---------------------------------------------------------------
 
-normalize_int_dir() {
-  local v="$1"
-  if [[ "$v" == "." ]]; then
-    printf "."
-  elif [[ "$v" == */* ]]; then
-    printf "%s" "$v"
-  elif [[ "$v" =~ ^intm-.*-ca$ ]]; then
-    printf "%s" "$v"
-  else
-    printf "intm-%s-ca" "$v"
-  fi
-}
+normalize_int_dir() { resolve_authority "$1"; }
 
 # Extrait le kind depuis un INT_DIR de la forme intm-<kind>-ca ; sinon vide.
 kind_from_int_dir() {
@@ -316,7 +320,10 @@ require_int_dir_with_kind() {
 #  DN & input validation
 # ============================================
 trim_spaces() { sed -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//' <<<"${1-}"; }
-has_control_chars() { LC_ALL=C grep -q '[[:cntrl:]]' <<<"$1"; }
+has_control_chars() {
+  case "$1" in *$'\n'*|*$'\r'*) return 0 ;; esac
+  LC_ALL=C grep -q '[[:cntrl:]]' <<<"$1"
+}
 no_double_space() { [[ "${1-}" != *"  "* ]]; }
 esc_sed() { printf '%s' "${1-}" | sed -e 's/[\/&\\]/\\&/g'; }
 
@@ -396,34 +403,18 @@ canonical_dn_rfc2253() {
 
 render_req_cnf_with_dn() {
   local in_cnf="$1" out_cnf="$2" c="$3" o="$4" ou="$5" cn="$6"
-  local c_esc o_esc ou_esc cn_esc tmp_raw
-  c_esc="$(esc_sed "$c")"
-  o_esc="$(esc_sed "$o")"
-  ou_esc="$(esc_sed "$ou")"
-  cn_esc="$(esc_sed "$cn")"
-
-  tmp_raw="$(mktemp)"
-  sed -e "s/__C__/${c_esc}/" \
-      -e "s/__O__/${o_esc}/" \
-      -e "s/__OU__/${ou_esc}/" \
-      -e "s/__CN__/${cn_esc}/" \
-      "$in_cnf" > "$tmp_raw"
-
-  # Drop empty DN lines inside [req_distinguished_name]
-  awk '
-    BEGIN { in_dn=0 }
-    /^\[ *req_distinguished_name *\]$/ { in_dn=1; print; next }
-    /^\[/ { if (in_dn) in_dn=0; print; next }
-    {
-      if (in_dn) {
-        if ($0 ~ /^[[:space:]]*C[[:space:]]*=[[:space:]]*$/) next
-        if ($0 ~ /^[[:space:]]*O[[:space:]]*=[[:space:]]*$/) next
-        if ($0 ~ /^[[:space:]]*OU[[:space:]]*=[[:space:]]*$/) next
-      }
-      print
+  PKI_C="$c" PKI_O="$o" PKI_OU="$ou" PKI_CN="$cn" awk '
+    function quote(v, i,c,out) {
+      out="\""; for(i=1;i<=length(v);i++) {c=substr(v,i,1); if(c=="\\" || c=="\"" || c=="$") out=out "\\"; out=out c}; return out "\""
     }
-  ' "$tmp_raw" > "$out_cnf"
-  rm -f "$tmp_raw"
+    /^[ \t]*\[/ {section=$0; gsub(/[ \t\[\]]/,"",section)}
+    section=="req_distinguished_name" && /^[ \t]*(C|O|OU|CN)[ \t]*=/ {
+      key=$0; sub(/=.*/,"",key); gsub(/[ \t]/,"",key)
+      value=ENVIRON["PKI_" key]; if(value!="") print key " = " quote(value); next
+    }
+    {print}
+  ' "$in_cnf" > "$out_cnf"
+
 }
 
 # ============================================
@@ -435,7 +426,8 @@ gen_private_key() {
   local alg; alg="$(echo "${1-}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
   local rsa_bits="${2-}"
   local ec_curve="${3-}"
-  local out="$4"
+  local destination="$4"
+  local out; out="$(mktemp "$(dirname "$destination")/.key.XXXXXX")"
   local quiet="${QUIET_OPENSSL:-0}"
 
   # Helper to run OpenSSL quietly/verbosely
@@ -492,6 +484,7 @@ gen_private_key() {
   esac
 
   chmod 400 "$out"
+  mv -f "$out" "$destination"
 }
 
 # Public key SPKI pin (sha256/base64) for cert or key
@@ -516,19 +509,11 @@ inspect_private_key_metadata() {
   DETECTED_KEY_CURVE=""
   DETECTED_KEY_EDDSA=""
 
-  [[ -s "$key_path" ]] || return 0
+  [[ -s "$key_path" ]] || die "Missing key: $key_path"
 
   local pkey_text=""
   pkey_text="$("$OPENSSL" pkey -in "$key_path" -text -noout 2>/dev/null || true)"
-  [[ -n "$pkey_text" ]] || return 0
-
-  if grep -q '^Private-Key: (' <<<"$pkey_text"; then
-    # shellcheck disable=SC2034
-    DETECTED_KEY_ALG="RSA"
-    # shellcheck disable=SC2034
-    DETECTED_KEY_SIZE="$(awk -F'[() ]' '/Private-Key:/ {for (i=1;i<=NF;i++) if ($i ~ /^[0-9]+$/) {print $i; exit}}' <<<"$pkey_text")"
-    return 0
-  fi
+  [[ -n "$pkey_text" ]] || die "Cannot inspect key: $key_path"
 
   if grep -Eq 'ASN1 OID:|NIST CURVE:' <<<"$pkey_text"; then
     # shellcheck disable=SC2034
@@ -558,44 +543,48 @@ inspect_private_key_metadata() {
     DETECTED_KEY_EDDSA="Ed448"
     return 0
   fi
+  if grep -q '^modulus:' <<<"$pkey_text"; then
+    # shellcheck disable=SC2034
+    DETECTED_KEY_ALG="RSA"
+    # shellcheck disable=SC2034
+    DETECTED_KEY_SIZE="$(awk -F'[() ]' '/Private-Key:/ {for (i=1;i<=NF;i++) if ($i ~ /^[0-9]+$/) {print $i; exit}}' <<<"$pkey_text")"
+    return 0
+  fi
+
+
+  die "Unsupported or unreadable key: $key_path"
 }
 
-# Assure que $INT_DIR/serial >= (max serial vu dans index.txt) + 1
+# Shared, fail-closed index/inventory parser. Preserve backslashes via environment.
+pki_records() {
+  local mode="$1" input="$2"
+  PKI_RECORD_MODE="$mode" PKI_RECORD_CN="${CN:-}" \
+    PKI_RECORD_NOW="$(date -u +%Y%m%d%H%M%SZ)" \
+    LC_ALL=C awk -f "$ROOT_DIR/bin/pki-records.awk" "$input"
+}
+
+# Validate the full index and counter before any counter update. The caller owns
+# the CA lock. Unsupported (>64-bit) values fail rather than truncate or wrap.
 ensure_serial_monotonic() {
-  local dir="$1"
-  local idx="$dir/index.txt"
-  local serfile="$dir/serial"
-
-  [[ -f "$serfile" ]] || echo 1000 > "$serfile"
-  [[ -f "$idx"     ]] || : > "$idx"
-
-  local max=0
-  # BSD/macOS-safe: pur bash arithmétique base 16
-  while IFS=$'\t' read -r _status _expiry _rev serial _rest; do
-    [[ -z "$serial" ]] && continue
-    # strip espaces/CR, garder hex
-    serial="${serial//$'\r'/}"
-    serial="${serial//[^0-9A-Fa-f]/}"
-    [[ -z "$serial" ]] && continue
-    # éviter erreurs si serial commence par zéro vide
-    local v=$((16#$serial))
-    (( v > max )) && max=$v
-  done < "$idx"
-
-  local cur_hex; cur_hex="$(tr -d '\r\n' < "$serfile")"
-  cur_hex="${cur_hex//[^0-9A-Fa-f]/}"
-  [[ -z "$cur_hex" ]] && cur_hex="0"
-  local cur=$((16#$cur_hex))
-
-  local need=$((max + 1))
-  if (( cur < need )); then
-    printf '%X\n' "$need" > "$serfile"
+  local dir="$1" current next tmp
+  [[ -f "$dir/index.txt" ]] || die "Missing index: $dir/index.txt"
+  if [[ -f "$dir/serial" ]]; then
+    current="$(cat "$dir/serial")"
+  else
+    current="1000"
   fi
+  next="$(PKI_RECORD_COUNTER="$current" pki_records serial "$dir/index.txt")" || return 1
+  if [[ ! -f "$dir/serial" || "$next" != "$current" ]]; then
+    tmp="$(mktemp "$dir/serial.tmp.XXXXXX")"
+    printf '%s\n' "$next" > "$tmp"
+    mv "$tmp" "$dir/serial"
+  fi
+  authority_path "$dir" "newcerts/$next.pem" >/dev/null
 }
 
 # -------------------------------------------
 # write_ca_meta
-# Écrit le metadata immuable d'une CA (root ou intermédiaire)
+# Écrit le metadata en lecture seule d'une CA (root ou intermédiaire)
 # Usage:
 #   write_ca_meta \
 #     "<CERT_PATH>" "<KEY_PATH>" "<OUT_FILE>" \
@@ -604,8 +593,8 @@ ensure_serial_monotonic() {
 #
 # Notes:
 # - Si ISSUER_CERT_PATH est vide → on traite comme self-signed (root).
-# - PATHLEN_OVERRIDE (ex: ROOT_PATHLEN) écrase la détection depuis le cert si non vide.
-# - Renseigne ALG + KEY_SIZE/CURVE/EDDSA avec fallback par introspection de la clé.
+# - Legacy request arguments are accepted for compatibility; key fields and
+#   PATHLEN come from the actual artifacts. Requested lifetime is labeled.
 # - Calcule DN, ISSUER_DN, SERIAL, ISSUER_SERIAL, SPKI_SHA256.
 # - Rend OUT_FILE en lecture seule (444).
 # -------------------------------------------
@@ -623,51 +612,10 @@ write_ca_meta() {
   local PATHLEN_OVERRIDE="${11:-}"
   local ISSUER_CERT_PATH="${12:-}"
 
-  # --- helpers locaux ---
-  trim() { local s="${1-}"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; printf '%s' "$s"; }
-
-  local alg_raw
-  local alg_lc
-  local key_size_raw
-  local key_curve_raw
-  local key_eddsa_raw
-  alg_raw="$(trim "${KEY_ALG_IN:-}")"
-  alg_lc="$(echo "$alg_raw" | tr '[:upper:]' '[:lower:]')"
-  key_size_raw="$(trim "${KEY_SIZE_IN:-}")"
-  key_curve_raw="$(trim "${KEY_CURVE_IN:-}")"
-  key_eddsa_raw="$(trim "${KEY_EDDSA_IN:-}")"
-
-  local meta_key_size=""
-  local meta_key_curve=""
-  local meta_key_eddsa=""
-
-  case "$alg_lc" in
-    rsa)     meta_key_size="$key_size_raw" ;;
-    ec)      meta_key_curve="$key_curve_raw" ;;
-    ed25519) meta_key_eddsa="Ed25519" ;;
-    ed448)   meta_key_eddsa="Ed448" ;;
-    eddsa)   meta_key_eddsa="${key_eddsa_raw:-Ed25519}" ;;
-    *)       ;;
-  esac
-
-  # --- Fallback: introspection depuis la clé si besoin ---
-  if [[ -s "$KEY_PATH" ]]; then
-    if [[ "$alg_lc" == "rsa" && -z "$meta_key_size" ]]; then
-      meta_key_size="$("$OPENSSL" pkey -in "$KEY_PATH" -text -noout 2>/dev/null \
-        | awk -F'[() ]' '/Private-Key:/ {for (i=1;i<=NF;i++) if ($i ~ /^[0-9]+$/) {print $i; exit}}')"
-    fi
-    if [[ "$alg_lc" == "ec" && -z "$meta_key_curve" ]]; then
-      meta_key_curve="$("$OPENSSL" pkey -in "$KEY_PATH" -text -noout 2>/dev/null \
-        | awk -F': *' '/ASN1 OID:/ {print $2; exit}')"
-    fi
-    if [[ "$alg_lc" =~ ^(eddsa|ed25519|ed448)$ && -z "$meta_key_eddsa" ]]; then
-      local ed_from_key
-      ed_from_key="$("$OPENSSL" pkey -in "$KEY_PATH" -text -noout 2>/dev/null \
-        | awk '/ED25519/ {print "Ed25519"; exit} /ED448/ {print "Ed448"; exit}')"
-      [[ -n "$ed_from_key" ]] && meta_key_eddsa="$ed_from_key"
-    fi
-  fi
-
+  check_pair "$CERT_PATH" "$KEY_PATH"
+  inspect_private_key_metadata "$KEY_PATH"
+  local alg_raw="$DETECTED_KEY_ALG"
+  local meta_key_size="$DETECTED_KEY_SIZE" meta_key_curve="$DETECTED_KEY_CURVE" meta_key_eddsa="$DETECTED_KEY_EDDSA"
   # --- DN / Issuer / Serials depuis le(s) cert(s) ---
   local dn_rfc2253 issuer_dn_rfc2253 serial_hex issuer_serial_hex
 
@@ -690,17 +638,13 @@ write_ca_meta() {
     | "$OPENSSL" dgst -sha256 -binary 2>/dev/null \
     | base64)"
 
-  # --- PathLen: override > cert ---
-  local pathlen=""
-  if [[ -n "$PATHLEN_OVERRIDE" ]]; then
-    pathlen="$(trim "$PATHLEN_OVERRIDE")"
-  else
-    pathlen="$( "$OPENSSL" x509 -in "$CERT_PATH" -text -noout 2>/dev/null \
-      | awk '/Path Length Constraint/ {print $4; exit}' )"
-  fi
+  local pathlen
+  pathlen="$("$OPENSSL" x509 -in "$CERT_PATH" -noout -text | sed -n 's/.*pathlen:\([0-9][0-9]*\).*/\1/p')"
+  local policy_config="${CERT_PATH%/certs/*}/openssl.cnf"
+  [[ -f "$policy_config" ]] || policy_config="${ROOT_CNF:-$policy_config}"
 
-  # --- Écriture (atomique & safe sur 0444 existant) ---
-  local _tmp; _tmp="$(mktemp -t cameta.XXXXXX || mktemp)"
+  # --- Écriture par renommage dans le même répertoire (sans garantie fsync) ---
+  local _tmp; _tmp="$(mktemp "$(dirname "$OUT_FILE")/.meta.XXXXXX")"
   {
     echo "CREATED_AT=$(date -u +%FT%TZ)"
     echo "OPENSSL_VERSION=$($OPENSSL version)"
@@ -710,7 +654,9 @@ write_ca_meta() {
     [[ -n "$meta_key_eddsa" ]] && echo "KEY_EDDSA=$meta_key_eddsa"
     [[ -n "$meta_key_size"  ]] && echo "KEY_SIZE=$meta_key_size"
     [[ -n "$meta_key_curve" ]] && echo "KEY_CURVE=$meta_key_curve"
-    echo "DAYS=$DAYS_VAL"
+    echo "REQUESTED_DAYS=$DAYS_VAL"
+    "$OPENSSL" x509 -in "$CERT_PATH" -noout -startdate -enddate
+    echo "POLICY_SHA256=$("$OPENSSL" dgst -sha256 "$policy_config" | awk '{print $NF}')"
     [[ -n "$pathlen" ]] && echo "PATHLEN=$pathlen"
     [[ -n "$serial_hex"        ]] && echo "SERIAL=$serial_hex"
     [[ -n "$issuer_serial_hex" ]] && echo "ISSUER_SERIAL=$issuer_serial_hex"
@@ -718,8 +664,8 @@ write_ca_meta() {
     [[ -n "$CA_DIR_VAL" ]] && echo "INT_DIR=$CA_DIR_VAL"
     [[ -n "$KIND_VAL"   ]] && echo "KIND=$KIND_VAL"
   } > "$_tmp"
-  install -m 444 "$_tmp" "$OUT_FILE"
-  rm -f "$_tmp"
+  chmod 444 "$_tmp"
+  mv -f "$_tmp" "$OUT_FILE"
 }
 
 # --- Utility: set filename=unknown for a revoked serial in index.txt ---
@@ -751,6 +697,7 @@ dedup_csv() {
 # ============================================
 ensure_root_layout() {
   local base="$1"
+  check_authority_paths "$base"
   mkdir -p "$base"/{certs,crl,newcerts,private}
   [[ -f "$base/index.txt" ]] || : > "$base/index.txt"
   [[ -f "$base/serial"    ]] || echo 1000 > "$base/serial"
@@ -759,16 +706,16 @@ ensure_root_layout() {
 
 ensure_intermediate_layout() {
   local base="$1"
+  check_authority_paths "$base"
   mkdir -p "$base"/{certs,crl,csr,newcerts,private}
   [[ -f "$base/index.txt" ]] || : > "$base/index.txt"
   [[ -f "$base/serial"    ]] || echo 1000 > "$base/serial"
   [[ -f "$base/crlnumber" ]] || echo 1000 > "$base/crlnumber"
 }
 
-create_root_openssl_cnf_if_missing() {
+_build_root_cnf() {
   local cnf="$1" root_abs="$2" days="$3" pathlen="${4-}"
   local basic_constraints="critical, CA:true"
-  [[ -f "$cnf" ]] && return 0
   if [[ -n "$pathlen" ]]; then
     basic_constraints="${basic_constraints}, pathlen:${pathlen}"
   fi
@@ -825,9 +772,8 @@ CONF
 }
 
 # Intermediate config creator
-create_intermediate_openssl_cnf_if_missing() {
+_build_intermediate_cnf() {
   local cnf="$1" int_abs="$2" days="$3"
-  [[ -f "$cnf" ]] && return 0
   cat > "$cnf" <<CONF
 [ ca ]
 default_ca = CA_default
@@ -890,7 +836,6 @@ CONF
   append_profile_file "$cnf" "leaf/smime-encrypt.cnf"
   append_profile_file "$cnf" "leaf/archive-legacy.cnf"
   append_profile_file "$cnf" "leaf/archive-seal.cnf"
-  append_alias_section_from_existing "$cnf" "archive" "archive_seal"
   append_profile_file "$cnf" "leaf/timestamping.cnf"
 }
 
@@ -915,3 +860,11 @@ assert_intermediate_ready() {
   [[ -d "$ROOT_DIR/$CA_DIR" ]] || die "Intermediate dir not found: $CA_DIR"
   [[ -f "$ROOT_DIR/$CA_DIR/openssl.cnf" ]] || warn "Missing $CA_DIR/openssl.cnf (will be generated by scripts if needed)"
 }
+
+# Shared path, generation and transaction contracts.
+source "$ROOT_DIR/bin/pki-state.sh"
+source "$ROOT_DIR/bin/pki-crl.sh"
+
+source "$ROOT_DIR/bin/pki-policy.sh"
+
+source "$ROOT_DIR/bin/pki-recovery.sh"

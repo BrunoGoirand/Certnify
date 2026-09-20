@@ -7,6 +7,7 @@
 set -euo pipefail
 # shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
+pki_plan_or_begin
 
 # ------------------------------------------------------------------
 # Réémission batch des leafs (modèle SANS symlink)
@@ -16,7 +17,7 @@ source "$(dirname "$0")/pki-env.sh"
 #   INPUT=out/<kind>-leafs[-<TS>].tsv      (optionnel; auto-sélection si vide)
 #   LEGACY_DIR=...                         (optionnel; auto si vide)
 #   ACTIVE_DIR=intm-${KIND}-ca             (auto)
-#   ISSUE_CMD="INT_DIR=intm-${KIND}-ca PROFILE=server_cert CN='%CN%' SAN='DNS:%CN%' DAYS=397 bin/gen-server.sh"
+#   ISSUE_CMD='SAN="DNS:$CN" DAYS=397 bin/gen-server.sh' (trusted shell command)
 #   DRY_RUN=0|1
 #   COL_SERIAL=1  COL_EXPIRES=2  COL_CN=3
 # ------------------------------------------------------------------
@@ -26,6 +27,13 @@ source "$(dirname "$0")/pki-env.sh"
 : "${COL_EXPIRES:=2}"
 : "${COL_CN:=3}"
 
+# Column mappings describe the four-column compatibility inventory.
+for column in "$COL_SERIAL" "$COL_EXPIRES" "$COL_CN"; do
+  case "$column" in 1|2|3|4) ;; *) die "Inventory columns must be positions 1..4" ;; esac
+done
+[[ "$COL_SERIAL" != "$COL_EXPIRES" && "$COL_SERIAL" != "$COL_CN" && "$COL_EXPIRES" != "$COL_CN" ]] \
+  || die "Inventory columns must be distinct"
+
 # Helper macOS-safe: retourne le TSV daté le + récent pour un KIND
 newest_tsv_for_kind() {
   local k="$1"
@@ -34,6 +42,7 @@ newest_tsv_for_kind() {
   shopt -s nullglob
   matches=(out/"${k}"-leafs-*.tsv)
   shopt -u nullglob
+  (( ${#matches[@]} )) || return 0
   while IFS= read -r c; do
     if [[ -s "$c" ]]; then
       printf '%s\n' "$c"
@@ -46,6 +55,7 @@ newest_tsv_for_kind() {
 # ---------- 0) Si INPUT fourni, essaie d'inférer KIND ----------
 if [[ -n "${INPUT:-}" && -z "${KIND:-}" ]]; then
   base="$(basename "$INPUT")"           # ex: web-leafs-<TS>.tsv | web-leafs.tsv
+  [[ "$base" == *-leafs.tsv || "$base" == *-leafs-*.tsv ]] || die "Specify KIND for a nonstandard INPUT basename"
   KIND="${base%%-leafs*}"
   [[ -n "$KIND" ]] || die "Impossible d'inférer KIND depuis INPUT: $INPUT"
 fi
@@ -95,6 +105,7 @@ if [[ -n "$latest_ts" ]]; then
   # S’il existe mais est vide → rien à faire, on sort proprement
   if [[ ! -s "$INPUT" ]]; then
     info "Aucun leaf à réémettre (TSV vide) pour le rollover ${latest_ts} : $INPUT"
+    info "Batch result: total=0 completed=0 already_completed=0 planned=0 failed=0"
     exit 0
   fi
 else
@@ -113,12 +124,14 @@ else
   # S’il existe mais est vide → rien à réémettre (OK)
   if [[ ! -s "$INPUT" ]]; then
     info "Aucun leaf à réémettre (TSV vide) : $INPUT"
+    info "Batch result: total=0 completed=0 already_completed=0 planned=0 failed=0"
     exit 0
   fi
 fi
 
 # ---------- 4) Répertoires actif & legacy ----------
 ACTIVE_DIR="${ACTIVE_DIR:-intm-${KIND}-ca}"
+ACTIVE_DIR="$(resolve_authority "$ACTIVE_DIR")"
 [[ -d "$ACTIVE_DIR" ]] || die "Répertoire actif introuvable: $ACTIVE_DIR"
 
 if [[ -z "${LEGACY_DIR:-}" ]]; then
@@ -128,97 +141,106 @@ if [[ -z "${LEGACY_DIR:-}" ]]; then
     shopt -s nullglob
     legcands=(intm-"${KIND}"-ca-legacy-*)
     shopt -u nullglob
-    LEGACY_DIR="$(printf '%s\n' "${legcands[@]}" | sort -r | head -n1 || true)"
+    LEGACY_DIR=""
+    if (( ${#legcands[@]} )); then
+      LEGACY_DIR="$(printf '%s\n' "${legcands[@]}" | sort -r | head -n1 || true)"
+    fi
     [[ -n "$LEGACY_DIR" ]] || LEGACY_DIR=""
   fi
 fi
+if [[ -n "${LEGACY_DIR:-}" ]]; then LEGACY_DIR="$(resolve_authority "$LEGACY_DIR")"; fi
 if [[ -n "${LEGACY_DIR:-}" && ! -d "$LEGACY_DIR" ]]; then
   die "LEGACY_DIR fourni mais introuvable: $LEGACY_DIR"
 fi
 
-# ---------- 5) ISSUE_CMD par défaut ----------
-if [[ -z "${ISSUE_CMD:-}" ]]; then
-  # SAN par défaut : email si CN ressemble à une adresse, sinon DNS
-  if [[ "${KIND}" =~ ^(auth|smime)$ ]]; then
-    DEFAULT_SAN="email:%CN%"
-  else
-    DEFAULT_SAN="DNS:%CN%"
-  fi
-
-  case "$KIND" in
-    web)
-      # Certs serveur
-      ISSUE_CMD="INT_DIR=intm-web-ca PROFILE=${PROFILE:-server_cert} CN='%CN%' SAN='${DEFAULT_SAN}' DAYS=${DAYS:-397} bin/gen-server.sh"
-      ;;
-
-    auth)
-      # Certs client (mutual-TLS)
-      ISSUE_CMD="INT_DIR=intm-auth-ca PROFILE=${PROFILE:-client_cert} CN='%CN%' SAN='${DEFAULT_SAN}' DAYS=${DAYS:-825} bin/gen-user.sh"
-      ;;
-
-    smime)
-      # S/MIME
-      ISSUE_CMD="INT_DIR=intm-smime-ca PROFILE=${PROFILE:-smime} CN='%CN%' SAN='${DEFAULT_SAN}' DAYS=${DAYS:-730} bin/gen-email.sh"
-      ;;
-
-    code)
-      # Signature de code
-      ISSUE_CMD="INT_DIR=intm-code-ca PROFILE=${PROFILE:-code_sign} CN='%CN%' DAYS=${DAYS:-730} bin/gen-code.sh"
-      ;;
-
-    archive|archives)
-      # Sceau/archive
-      ISSUE_CMD="INT_DIR=intm-archive-ca PROFILE=${PROFILE:-archive} CN='%CN%' DAYS=${DAYS:-3650} bin/gen-archive.sh"
-      ;;
-
-    *)
-      die "KIND inconnu pour ISSUE_CMD par défaut: '${KIND}' (attendu: web|auth|smime|code|archive)"
-      ;;
-  esac
-fi
+# Built-in commands receive row values as environment data, never shell source.
+case "$KIND" in
+  web) ISSUE_SCRIPT=bin/gen-server.sh; DEFAULT_DAYS=397 ;;
+  auth|user) ISSUE_SCRIPT=bin/gen-user.sh; DEFAULT_DAYS=825 ;;
+  smime) ISSUE_SCRIPT=bin/gen-email.sh; DEFAULT_DAYS=730 ;;
+  code) ISSUE_SCRIPT=bin/gen-code.sh; DEFAULT_DAYS=730 ;;
+  archive|archives) ISSUE_SCRIPT=bin/gen-archive.sh; DEFAULT_DAYS=3650 ;;
+  *) [[ -n "${ISSUE_CMD:-}" ]] || die "Unknown KIND: $KIND" ;;
+esac
+case "${ISSUE_CMD:-}" in
+  *%CN%*|*%SERIAL%*|*%EXPIRES%*)
+    die 'ISSUE_CMD placeholders are unsupported; use quoted "$CN", "$SERIAL", "$EXPIRES", and "$ACTIVE_DIR" environment variables' ;;
+esac
+[[ "$DRY_RUN" == 0 || "$DRY_RUN" == 1 ]] || die "DRY_RUN must be 0 or 1"
+warn "Reissuance mode: legacy CN-only; original subject, SANs, extensions and validity are not preserved."
 
 # ---------- 6) Sanity checks ----------
 [[ -f "${ACTIVE_DIR}/certs/ca.cert.pem" ]]   || die "Cert intermédiaire actif manquant: ${ACTIVE_DIR}/certs/ca.cert.pem"
 [[ -f "${ACTIVE_DIR}/certs/chain.cert.pem" ]]|| die "Chaîne active manquante: ${ACTIVE_DIR}/certs/chain.cert.pem"
 
-# ---------- 7) Traitement TSV ----------
-total=0; ok=0; ko=0
+# Validate every row before executing any command. Non-whitespace separators
+# preserve empty TSV columns; unsupported/malformed input fails as a whole.
+PARSED_INPUT="$(mktemp)"
+trap 'rm -f "$PARSED_INPUT"; release_locks' EXIT
+COL_SERIAL="$COL_SERIAL" COL_EXPIRES="$COL_EXPIRES" COL_CN="$COL_CN" \
+  pki_records inventory "$INPUT" > "$PARSED_INPUT"
+check_config "$ACTIVE_DIR"
+export CERTNIFY_EXPECTED_ISSUER="$(certificate_id "$ACTIVE_DIR/certs/ca.cert.pem")"
+release_locks
+total=0; ok=0; ko=0; planned=0; completed=0
 
-while IFS=$'\t' read -r col1 col2 col3 col4 rest; do
-  [[ -n "$col1$col2$col3$col4" ]] || continue
-
-  arr=("$col1" "$col2" "$col3" "$col4" "$rest")
-  getcol() { local idx="$1"; printf '%s' "${arr[$((idx-1))]:-}"; }
-
-  serial="$(getcol "$COL_SERIAL")"
-  expires="$(getcol "$COL_EXPIRES")"
-  cn="$(getcol "$COL_CN")"
-
-  [[ -n "$serial" && -n "$cn" ]] || continue
-  ((total++))
-
-  cmd="${ISSUE_CMD//%CN%/$cn}"
-  cmd="${cmd//%SERIAL%/$serial}"
-  cmd="${cmd//%EXPIRES%/$expires}"
-
+while IFS=$'\x1F' read -r serial expires cn; do
+  total=$((total + 1))
   export ACTIVE_DIR LEGACY_DIR
-
-  echo "[RUN] $cmd"
-  if [[ "$DRY_RUN" == "1" ]]; then
+  if [[ "$DRY_RUN" == 1 ]]; then
+    planned=$((planned + 1))
+    echo "[ITEM] serial=$serial status=planned cn=$cn"
     continue
   fi
 
-  set +e
-  bash -c "$cmd"
-  rc=$?
-  set -e
-  if [[ $rc -eq 0 ]]; then
-    ((ok++))
-    echo "[OK ] Réémis: CN='$cn' (serial=$serial)"
-  else
-    ((ko++))
-    echo "[!! ] Échec réémission: CN='$cn' (serial=$serial) rc=$rc" >&2
+  # Claim under the workspace lock, release it before the child transaction.
+  # A failed/abandoned attempt requires review, never an automatic retry.
+  pki_begin
+  trap 'rm -f "$PARSED_INPUT"; release_locks' EXIT
+  check_config "$ACTIVE_DIR"
+  [[ "$(certificate_id "$ACTIVE_DIR/certs/ca.cert.pem")" == "$CERTNIFY_EXPECTED_ISSUER" ]] || die "Active issuer changed during batch"
+  item_id="$(printf '%s\n' "$CERTNIFY_EXPECTED_ISSUER" "$LEGACY_DIR" "$serial" "$expires" "$cn" | "$OPENSSL" dgst -sha256 | awk '{print $NF}')"
+  receipt="$(authority_path "$ACTIVE_DIR" "reissues/$item_id")"
+  if [[ -e "$receipt" ]]; then
+    state="$(cat "$receipt")"
+    release_locks
+    if [[ "$state" == completed ]]; then
+      completed=$((completed + 1))
+      echo "[ITEM] serial=$serial status=already_completed cn=$cn"
+    else
+      ko=$((ko + 1))
+      echo "[ITEM] serial=$serial status=needs_review receipt=$receipt cn=$cn" >&2
+    fi
+    continue
   fi
-done < "$INPUT"
+  mkdir -p "$(dirname "$receipt")"
+  printf 'started\n' > "$receipt"
+  release_locks
 
-info "Batch terminé: total=$total ok=$ok ko=$ko"
+  rc=0
+  if [[ -n "${ISSUE_CMD:-}" ]]; then
+    CN="$cn" SERIAL="$serial" EXPIRES="$expires" INT_DIR="$ACTIVE_DIR" bash -c "$ISSUE_CMD" || rc=$?
+  else
+    case "$KIND" in web) row_san="DNS:$cn" ;; auth|user|smime) row_san="email:$cn" ;; *) row_san="" ;; esac
+    CN="$cn" SERIAL="$serial" EXPIRES="$expires" INT_DIR="$ACTIVE_DIR" \
+      SAN="$row_san" DAYS="${DAYS:-$DEFAULT_DAYS}" "$ISSUE_SCRIPT" || rc=$?
+  fi
+  pki_begin
+  trap 'rm -f "$PARSED_INPUT"; release_locks' EXIT
+  # A concurrent lifecycle move may have moved the receipt. Do not recreate it
+  # in a new active authority: leave the retained started receipt for review.
+  [[ "$(certificate_id "$ACTIVE_DIR/certs/ca.cert.pem")" == "$CERTNIFY_EXPECTED_ISSUER" && -f "$receipt" ]] || die "Authority moved during batch; inspect retained attempt before retry"
+  if [[ "$rc" == 0 ]]; then
+    printf 'completed\n' > "$receipt"
+    ok=$((ok + 1))
+    echo "[ITEM] serial=$serial status=completed cn=$cn"
+  else
+    printf 'needs_review\n' > "$receipt"
+    ko=$((ko + 1))
+    echo "[ITEM] serial=$serial status=failed rc=$rc receipt=$receipt cn=$cn" >&2
+  fi
+  release_locks
+done < "$PARSED_INPUT"
+
+info "Batch result: total=$total completed=$ok already_completed=$completed planned=$planned failed=$ko"
+[[ "$ko" == 0 ]]

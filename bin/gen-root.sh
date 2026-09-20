@@ -74,7 +74,7 @@
 # root/private/ca.key.pem        Private key (chmod 600)
 # root/certs/ca.cert.pem         Self-signed root certificate (chmod 444)
 # root/openssl.cnf               OpenSSL configuration (auto-generated)
-# root/ca.meta                   Immutable metadata file with:
+# root/ca.meta                   Read-only metadata file with:
 #                                 • DN / issuer
 #                                 • serial / pathLen / SKI / SPKI
 #                                 • OpenSSL version / creation timestamp
@@ -83,7 +83,7 @@
 # - The root certificate is self-signed using SHA-256 (except EdDSA).
 # - A pathLen constraint is set to limit intermediate depth unless disabled.
 # - All outputs are permissioned strictly (600 for private, 444 for public).
-# - Metadata is always written atomically and immutable.
+# - Metadata is staged beside its destination and renamed; permissions are read-only.
 #
 # === Example Usage ===
 #   # Minimal invocation (default RSA root)
@@ -99,13 +99,14 @@
 set -euo pipefail
 # shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
+pki_begin
 
 REQ_CNF=""
 cleanup() {
   [[ -n "$REQ_CNF" ]] && rm -f "$REQ_CNF"
-  release_locks
+  return 0
 }
-trap cleanup EXIT
+trap 'rc=$?; cleanup; pki_exit "$rc"' EXIT
 
 # ============================================
 #  Root CA generator (hardened)
@@ -156,6 +157,7 @@ ensure_root_layout "root"
 
 ROOT_ABS="$(pwd)/root"
 ROOT_CNF="${ROOT_CNF:-$ROOT_DIR/root/openssl.cnf}"
+ROOT_CNF="$(workspace_path "$ROOT_CNF")"
 mkdir -p "$(dirname "$ROOT_CNF")"
 
 create_root_openssl_cnf_if_missing "$ROOT_CNF" "$ROOT_ABS" "$DAYS" "${ROOT_PATHLEN:-}"
@@ -177,6 +179,9 @@ if [[ -s "$EXISTING_CRT" ]]; then
     die "Refus d'écraser la ROOT (DN existant='$existing_dn' ≠ demandé='$requested_dn'). Supprime 'root/' pour réinitialiser."
   fi
 fi
+
+[[ ! -s "$EXISTING_CRT" || -s "$KEY_PATH" ]] || die "Existing root certificate has no private key; restore its original key"
+if [[ ! -s "$EXISTING_CRT" ]]; then recovery_start "root authority=root"; fi
 
 # ---- Private key (create if missing) ----
 if [[ ! -s "$KEY_PATH" ]]; then
@@ -219,6 +224,10 @@ if [[ ! -s "$CRT_PATH" ]]; then
   info "Using DN: C='${C}' O='${O}' OU='${OU}' CN='${CN}'"
   info "Self-signing ROOT certificate (${CN}) for ${DAYS} days…"
 
+  ROOT_STAGED_CERT="$(mktemp root/certs/.root.XXXXXX)"
+  recovery_note "key=$KEY_PATH staged_certificate=$ROOT_STAGED_CERT"
+  recovery_phase self-signing-outcome-uncertain
+
   # EdDSA: pas de -sha256 (OpenSSL l'ignore, mais on évite de le passer)
   use_sha256=1
   case "${effective_key_alg:-}" in
@@ -229,21 +238,25 @@ if [[ ! -s "$CRT_PATH" ]]; then
   if [[ "$QUIET_OPENSSL" == "1" ]]; then
     if [[ "$use_sha256" == "1" ]]; then
       "$OPENSSL" req -batch -config "$REQ_CNF" -key "$KEY_PATH" -new -x509 \
-        -sha256 -extensions v3_ca -days "$DAYS" -out "$CRT_PATH" >/dev/null 2>&1
+        -sha256 -extensions v3_ca -days "$DAYS" -out "$ROOT_STAGED_CERT" >/dev/null 2>&1
     else
       "$OPENSSL" req -batch -config "$REQ_CNF" -key "$KEY_PATH" -new -x509 \
-        -extensions v3_ca -days "$DAYS" -out "$CRT_PATH" >/dev/null 2>&1
+        -extensions v3_ca -days "$DAYS" -out "$ROOT_STAGED_CERT" >/dev/null 2>&1
     fi
   else
     if [[ "$use_sha256" == "1" ]]; then
       "$OPENSSL" req -batch -config "$REQ_CNF" -key "$KEY_PATH" -new -x509 \
-        -sha256 -extensions v3_ca -days "$DAYS" -out "$CRT_PATH"
+        -sha256 -extensions v3_ca -days "$DAYS" -out "$ROOT_STAGED_CERT"
     else
       "$OPENSSL" req -batch -config "$REQ_CNF" -key "$KEY_PATH" -new -x509 \
-        -extensions v3_ca -days "$DAYS" -out "$CRT_PATH"
+        -extensions v3_ca -days "$DAYS" -out "$ROOT_STAGED_CERT"
     fi
   fi
-  chmod 444 "$CRT_PATH"
+  check_pair "$ROOT_STAGED_CERT" "$KEY_PATH"
+  "$OPENSSL" verify -CAfile "$ROOT_STAGED_CERT" "$ROOT_STAGED_CERT" >/dev/null
+  staged_install "$ROOT_STAGED_CERT" "$CRT_PATH"
+  rm -f "$ROOT_STAGED_CERT"
+  recovery_phase certificate-installed
   info "Root CA ready: $CRT_PATH"
 
   # Fingerprint, SKI, SPKI (info)
@@ -337,6 +350,7 @@ if [[ ! -s "$CRT_PATH" ]]; then
   fi
 else
   info "Root certificate already exists: $CRT_PATH (skip)"
+  write_ca_meta "$CRT_PATH" "$KEY_PATH" root/ca.meta "" "" "" "" "$DAYS" "" "" "" ""
 fi
 
 # ---------------------------
@@ -352,3 +366,5 @@ fi
 
 # ---- Success message ----
 info "Done"
+
+recovery_complete

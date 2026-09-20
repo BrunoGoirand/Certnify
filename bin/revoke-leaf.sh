@@ -10,7 +10,7 @@
 # Usage examples:
 #   make revoke KIND="web" CN="app.example.com" REASON="keyCompromise"
 #   make revoke INT_DIR="intm-web-ca" CN="app.example.com" REASON="cessationOfOperation"
-#   make revoke FILE="intm-web-ca/certs/app.example.com.cert.pem" REASON="superseded"
+#   make revoke KIND=web FILE="intm-web-ca/certs/app.example.com.cert.pem" REASON="superseded"
 #   make revoke INT_DIR="intm-web-ca" SERIAL="1002" REASON="superseded"
 #
 # Env:
@@ -21,12 +21,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bin/pki-env.sh
 source "${SCRIPT_DIR}/pki-env.sh"
+normalize_revocation_reason
+pki_plan_or_begin
 
 # --- Defaults ---
 : "${INT_DIR:=}"; : "${KIND:=}"; : "${CN:=}"; : "${FILE:=}"; : "${SERIAL:=}"
 : "${REASON:=cessationOfOperation}"; : "${CRL_UPDATE:=1}"; : "${CRL_DAYS:=7}"
 : "${DRY_RUN:=0}"; : "${QUIET_OPENSSL:=1}"; : "${DEBUG:=0}"
 OPENSSL="${OPENSSL:-openssl}"
+
 
 # --- Debug helpers ---
 if [[ "$DEBUG" == "1" ]]; then
@@ -37,13 +40,7 @@ fi
 dbg(){ [[ "$DEBUG" == "1" ]] && echo "[DBG ] $*" >&2 || true; }
 
 # --- Helpers (alignés avec verify.sh) ---
-normalize_int_dir() {
-  local v="$1"
-  if   [[ "$v" == "." ]]; then printf "."
-  elif [[ "$v" == */* ]]; then printf "%s" "$v"
-  elif [[ "$v" =~ ^intm-.*-ca$ ]]; then printf "%s" "$v"
-  else printf "intm-%s-ca" "$v"; fi
-}
+
 safe(){ local s="$1"; s="${s//[^A-Za-z0-9._-]/_}"; while [[ "$s" == *"__"* ]]; do s="${s//__/_}"; done; s="${s##_}"; s="${s%%_}"; echo "$s"; }
 ossl(){
   if [[ "$DRY_RUN" == "1" ]]; then echo "[DRY] $OPENSSL $*"; return 0; fi
@@ -57,6 +54,9 @@ if [[ -n "$INT_DIR" ]]; then
 elif [[ -n "$KIND" ]]; then
   CA_DIR="intm-${KIND}-ca"
 fi
+CA_DIR="$(resolve_authority "$CA_DIR")"
+check_config "$CA_DIR"
+check_config root
 [[ -n "$CA_DIR" ]] || die "Spécifie INT_DIR=... ou KIND=... pour cibler l'intermédiaire."
 info "Using intermediate: ${CA_DIR}"
 assert_intermediate_ready
@@ -66,38 +66,47 @@ CNF="openssl.cnf"; INDEX_LOCAL="index.txt"
 [[ -f "$CNF" ]] || die "Missing $CA_DIR/$CNF"
 [[ -f "$INDEX_LOCAL" ]] || die "Missing $CA_DIR/$INDEX_LOCAL"
 
-# --- Resolve target (FILE > SERIAL > CN), sans variantes ---
+# Validate history before selecting or mutating any record.
+pki_records validate "$INDEX_LOCAL" >/dev/null
+
+# --- Resolve target (FILE > SERIAL > CN) ---
 TARGET=""
 dbg "Inputs: FILE='${FILE}', SERIAL='${SERIAL}', CN='${CN}'"
 
 # 1) FILE
 if [[ -n "$FILE" ]]; then
+  FILE="$(resolve_leaf_file "$CA_DIR" "$FILE")"
   [[ -f "$FILE" ]] || die "Specified FILE does not exist: $FILE"
   TARGET="$FILE"
 fi
 
-# 2) SERIAL
+# 2) SERIAL: compare hexadecimal values, retaining the indexed spelling for paths.
 if [[ -z "$TARGET" && -n "$SERIAL" ]]; then
-  serial_uc="$(printf '%s' "$SERIAL" | tr '[:lower:]' '[:upper:]')"
-  if [[ -f "newcerts/${serial_uc}.pem" ]]; then
-    TARGET="newcerts/${serial_uc}.pem"
-  else
-    candidate="$(awk -F'\t' -v s="$serial_uc" '$4==s{print $5;exit}' "$INDEX_LOCAL" || true)"
-    if [[ -n "$candidate" && "$candidate" != "unknown" && -f "$candidate" ]]; then
+  selected="$(PKI_RECORD_SERIAL="$SERIAL" pki_records serial-target "$INDEX_LOCAL")" || exit 1
+  if [[ -n "$selected" ]]; then
+    IFS=$'\x1F' read -r serial_uc candidate <<< "$selected"
+    if [[ -f "newcerts/${serial_uc}.pem" ]]; then
+      TARGET="newcerts/${serial_uc}.pem"
+    elif [[ "$candidate" != "unknown" && -f "$candidate" ]]; then
       TARGET="$candidate"
     fi
   fi
 fi
 
-# 3) CN (canonical form only)
+# An explicit serial must never fall through to a different CN target.
+if [[ -z "$TARGET" && -n "$SERIAL" ]]; then
+  die "Certificate not found for explicit SERIAL=$SERIAL"
+fi
+
+# 3) Exact CN: one active match, otherwise one unambiguous historical record.
 if [[ -z "$TARGET" && -n "$CN" ]]; then
-  # Préfère le DERNIER certificat VALIDE (statut V) pour ce CN depuis l'index
-  serial_uc="$(awk -F'\t' -v pat="CN=${CN}" '$1=="V" && index($6, pat)>0 { s=$4 } END { if (s!="") print s }' "$INDEX_LOCAL" | tr '[:lower:]' '[:upper:]')"
-  if [[ -n "$serial_uc" && -f "newcerts/${serial_uc}.pem" ]]; then
-    TARGET="newcerts/${serial_uc}.pem"
-  else
-    # Fallback historique (peut pointer un ancien cert si non rafraîchi)
-    TARGET="certs/${CN}.cert.pem"
+  serial_uc="$(pki_records revoke "$INDEX_LOCAL")" || exit 1
+  TARGET="newcerts/${serial_uc}.pem"
+  if [[ ! -f "$TARGET" ]]; then
+    candidate="$(awk -F '\t' -v s="$serial_uc" '$4==s{print $5;exit}' "$INDEX_LOCAL")"
+    [[ -n "$candidate" && "$candidate" != "unknown" && -f "$candidate" ]] \
+      || die "Missing indexed certificate for serial $serial_uc; use FILE explicitly"
+    TARGET="$candidate"
   fi
 fi
 
@@ -114,70 +123,37 @@ SERIAL_HEX="$(openssl_serial "$TARGET")"
 SERIAL_HEX="$(printf '%s' "$SERIAL_HEX" | tr '[:lower:]' '[:upper:]')"
 
 before_status="$(awk -F'\t' -v s="$SERIAL_HEX" '$4==s{st=$1} END{if (st!="") print st}' "$INDEX_LOCAL" || true)"
-if [[ "$before_status" == "R" ]]; then
-  info "Serial $SERIAL_HEX is already revoked. Nothing to do."
+[[ "$before_status" == V || "$before_status" == E || "$before_status" == R ]] || die "Certificate is not uniquely recorded in issuer index"
+
+# Resolve the signing generation cryptographically before any database mutation.
+TARGET="$(authority_path "$CA_DIR" "$TARGET")"
+resolve_leaf_issuer "$CA_DIR" "$TARGET"
+check_pair "$ISSUER_CERT" "$ISSUER_KEY"
+CRL_TARGET="$ROOT_DIR/$CA_DIR/crl/ca.crl.pem"
+if [[ "$ISSUER_ID" != "$(certificate_id "$ROOT_DIR/$CA_DIR/certs/ca.cert.pem")" ]]; then
+  CRL_TARGET="$ROOT_DIR/$CA_DIR/generations/$ISSUER_ID/ca.crl.pem"
+fi
+
+CRL_TARGET="$(authority_path "$CA_DIR" "$CRL_TARGET")"
+
+if [[ "$DRY_RUN" == 1 ]]; then
+  info "PLAN serial=$SERIAL_HEX current=$before_status revoke=$([[ "$before_status" == R ]] && echo no || echo yes) crl_refresh=$CRL_UPDATE issuer=$ISSUER_ID"
   exit 0
 fi
 
-# --- Sanity: issuer match ---
-INT_CA_CERT="$ROOT_DIR/$CA_DIR/certs/ca.cert.pem"
-[[ -f "$INT_CA_CERT" ]] || die "Missing intermediate CA cert: $INT_CA_CERT"
-target_issuer="$("$OPENSSL" x509 -in "$TARGET" -noout -issuer 2>/dev/null | sed 's/^issuer= *//I')"
-int_subject="$("$OPENSSL" x509 -in "$INT_CA_CERT" -noout -subject 2>/dev/null | sed 's/^subject= *//I')"
-norm(){ sed 's/, */,/g' | tr -d '\r'; }
-if [[ -n "$target_issuer" && -n "$int_subject" ]]; then
-  if [[ "$(printf '%s' "$target_issuer" | norm)" != "$(printf '%s' "$int_subject" | norm)" ]]; then
-    die "Issuer mismatch: target '$target_issuer' vs intermediate '$int_subject' (wrong INT_DIR/KIND?)"
+if [[ "$before_status" == R ]]; then
+  info "Serial $SERIAL_HEX already revoked; CRL refresh requested=$CRL_UPDATE"
+else
+  if ! ossl ca -batch -config "$CNF" -cert "$ISSUER_CERT" -keyfile "$ISSUER_KEY" -revoke "$TARGET" -crl_reason "$REASON"; then
+    die "Revocation backend failed for $SERIAL_HEX; inspect index (revocation may have committed); no automatic retry"
   fi
+  after_status="$(awk -F '\t' -v s="$SERIAL_HEX" '$4==s{print $1}' "$INDEX_LOCAL")"
+  [[ "$after_status" == R ]] || die "Unexpected database state after revocation: $SERIAL_HEX"
+  index_set_filename_for_revoked "$INDEX_LOCAL" "$SERIAL_HEX" || die "Revocation committed; index normalization failed"
 fi
-
-# --- Reason normalization ---
-map_privilege_withdrawn_to="${MAP_PRIV_WITHDRAWN_TO:-cessationOfOperation}"
-case "$REASON" in
-  unspecified|keyCompromise|CACompromise|affiliationChanged|superseded|cessationOfOperation|certificateHold|removeFromCRL|AACompromise) ;;
-  privilegeWithdrawn)
-    warn "Reason 'privilegeWithdrawn' not supported by OpenSSL; mapping to '$map_privilege_withdrawn_to'."
-    REASON="$map_privilege_withdrawn_to"
-    ;;
-  *) die "Unsupported revocation reason: '$REASON'";;
-esac
-
-# --- Guard for removeFromCRL ---
-if [[ "$REASON" == "removeFromCRL" ]]; then
-  if [[ "$before_status" != "R" ]]; then
-    warn "removeFromCRL demandé mais le certificat n'est pas marqué R (revoked). OpenSSL va probablement échouer."
-  else
-    current_reason="$("$OPENSSL" x509 -in "$TARGET" -noout -text 2>/dev/null | awk '/CRL Reason Code/ {getline; gsub(/^ +| +$/,""); print; exit}' || true)"
-    if [[ -n "$current_reason" && "$current_reason" != "certificateHold" ]]; then
-      warn "removeFromCRL ne s'applique qu'aux certificats en 'certificateHold' (actuel: '$current_reason')."
-    fi
-  fi
+if [[ "$CRL_UPDATE" == 1 ]]; then
+  publish_crl "$CA_DIR" "$ISSUER_CERT" "$ISSUER_KEY" "$CRL_TARGET" -crldays "$CRL_DAYS" \
+    || die "Revocation is committed for $SERIAL_HEX; CRL refresh failed and previous CRL was preserved"
+  info "CRL updated: $CRL_TARGET"
 fi
-
-# --- Revoke (idempotent) ---
-if ! ossl ca -batch -config "$CNF" -revoke "$TARGET" -crl_reason "$REASON"; then
-  if "$OPENSSL" ca -batch -config "$CNF" -revoke "$TARGET" -crl_reason "$REASON" 2>&1 | grep -qi 'already revoked'; then
-    info "Serial $SERIAL_HEX was already revoked. Nothing to do."
-    exit 0
-  fi
-  die "OpenSSL revocation failed for serial $SERIAL_HEX"
-fi
-
-# --- Update index filename=unknown ---
-after_status="$(awk -F'\t' -v s="$SERIAL_HEX" '$4==s{print $1;exit}' "$INDEX_LOCAL" || true)"
-[[ "$after_status" == "R" ]] || die "Revocation did not flip status to 'R' for serial $SERIAL_HEX"
-
-awk -F'\t' -v s="$SERIAL_HEX" 'BEGIN{FS=OFS="\t"} { if ($1=="R" && $4==s && $5!="unknown") $5="unknown"; print }' \
-  "$INDEX_LOCAL" > "$INDEX_LOCAL.tmp" && mv "$INDEX_LOCAL.tmp" "$INDEX_LOCAL"
-info "DB updated for serial $SERIAL_HEX"
-
-# --- Refresh CRL ---
-if [[ "$CRL_UPDATE" == "1" ]]; then
-  mkdir -p crl
-  TMP="$(mktemp -t crl.XXXXXX || mktemp)"
-  ossl ca -batch -config "$CNF" -gencrl -crldays "$CRL_DAYS" -out "$TMP"
-  install -m 444 "$TMP" crl/ca.crl.pem; rm -f "$TMP"
-  info "CRL updated: $CA_DIR/crl/ca.crl.pem"
-fi
-
-info "Revoked: $TARGET (serial $SERIAL_HEX, reason: $REASON)"
+info "Revoked: $TARGET (serial $SERIAL_HEX)"

@@ -7,6 +7,7 @@
 set -euo pipefail
 # shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
+pki_begin
 
 # ------------------------------------------------------------
 # Liste les leafs émis par un intermédiaire (depuis index.txt)
@@ -36,7 +37,10 @@ else
   shopt -s nullglob
   legacy_dirs=("intm-${KIND}-ca-legacy-"*)
   shopt -u nullglob
-  latest_legacy="$(printf '%s\n' "${legacy_dirs[@]}" | sort -r | head -n1 || true)"
+  latest_legacy=""
+  if (( ${#legacy_dirs[@]} )); then
+    latest_legacy="$(printf '%s\n' "${legacy_dirs[@]}" | sort -r | head -n1 || true)"
+  fi
   if [[ -n "$latest_legacy" ]]; then
     INT_DIR="$latest_legacy"
     # extrait le timestamp après "-legacy-"
@@ -47,6 +51,8 @@ else
   fi
 fi
 
+INT_DIR="$(resolve_authority "$INT_DIR")"
+check_authority_paths "$INT_DIR"
 INDEX="${INT_DIR}/index.txt"
 [[ -f "$INDEX" ]] || die "index.txt introuvable: $INDEX"
 
@@ -66,64 +72,19 @@ if [[ -z "${OUT:-}" ]]; then
   fi
 fi
 
-if [[ "$OUT" != "-" ]]; then
+[[ "$OUT" == "-" ]] || OUT="$(workspace_path "$OUT")"
+
+# Validate the entire selection before publishing or replacing an inventory.
+TMP_LIST="$(mktemp)"
+trap 'rm -f "$TMP_LIST"; release_locks' EXIT
+INCLUDE_REVOKED="$INCLUDE_REVOKED" INCLUDE_EXPIRED="$INCLUDE_EXPIRED" \
+  pki_records list "$INDEX" > "$TMP_LIST"
+info "Listing from index: $INDEX" >&2
+if [[ "$OUT" == "-" ]]; then
+  cat "$TMP_LIST"
+else
   mkdir -p "$(dirname "$OUT")"
+  install -m 600 "$TMP_LIST" "$OUT"
+  info "Inventory written: $OUT" >&2
 fi
-
-info "Listing from index: $INDEX"
-info "Writing to: $OUT"
-
-# 4) Extraction
-if [[ "$OUT" = "-" ]]; then
-  awk -F '\t' -v incR="$INCLUDE_REVOKED" -v incE="$INCLUDE_EXPIRED" '
-  function ymdhms_to_iso(s,  y,M,d,h,m,S) {
-    y=substr(s,1,2)+0; M=substr(s,3,2); d=substr(s,5,2);
-    h=substr(s,7,2); m=substr(s,9,2); S=substr(s,11,2);
-    if (y < 70) y = 2000 + y; else y = 1900 + y;
-    return sprintf("%04d-%s-%sT%s:%s:%sZ", y, M, d, h, m, S);
-  }
-  BEGIN { OFS="\t" }
-  {
-    status=$1; expiry=$2; serial=$4; file=$5; dn=$6;
-    inc = (status=="V") || (status=="R" && incR=="1") || (status=="E" && incE=="1");
-    if (!inc) next;
-    cn = "";
-    if (dn ~ /CN=/) {
-      tmp = dn; sub(/^.*\/CN=/, "", tmp); if (tmp == dn) { tmp = dn; sub(/^.*[, ]CN=/, "", tmp); }
-      sub(/[\/,].*$/, "", tmp); cn = tmp;
-    }
-    print serial, ymdhms_to_iso(expiry), cn, file;
-  }' "$INDEX"
-else
-  awk -F '\t' -v incR="$INCLUDE_REVOKED" -v incE="$INCLUDE_EXPIRED" '
-  function ymdhms_to_iso(s,  y,M,d,h,m,S) {
-    y=substr(s,1,2)+0; M=substr(s,3,2); d=substr(s,5,2);
-    h=substr(s,7,2); m=substr(s,9,2); S=substr(s,11,2);
-    if (y < 70) y = 2000 + y; else y = 1900 + y;
-    return sprintf("%04d-%s-%sT%s:%s:%sZ", y, M, d, h, m, S);
-  }
-  BEGIN { OFS="\t" }
-  {
-    status=$1; expiry=$2; serial=$4; file=$5; dn=$6;
-    inc = (status=="V") || (status=="R" && incR=="1") || (status=="E" && incE=="1");
-    if (!inc) next;
-    cn = "";
-    if (dn ~ /CN=/) {
-      tmp = dn; sub(/^.*\/CN=/, "", tmp); if (tmp == dn) { tmp = dn; sub(/^.*[, ]CN=/, "", tmp); }
-      sub(/[\/,].*$/, "", tmp); cn = tmp;
-    }
-    print serial, ymdhms_to_iso(expiry), cn, file;
-  }' "$INDEX" > "$OUT"
-fi
-
-# Log final
-if [[ "$OUT" = "-" ]]; then
-  : # rien à vérifier proprement
-else
-  if grep -q . "$OUT"; then
-    info "Leafs listed OK."
-  else
-    warn "Aucune entrée sélectionnée (filtrage ? statut ?)."
-  fi
-fi
-[[ -n "$ts" ]] && info "Rollover timestamp: $ts (legacy: intm-${KIND}-ca-legacy-$ts)"
+exit 0

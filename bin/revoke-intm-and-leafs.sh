@@ -8,6 +8,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=bin/pki-env.sh
 source "${SCRIPT_DIR}/pki-env.sh"
+normalize_revocation_reason
+pki_plan_or_begin
 
 OPENSSL="${OPENSSL:-openssl}"
 
@@ -15,7 +17,7 @@ OPENSSL="${OPENSSL:-openssl}"
 # Inputs (env variables)
 # ---------------------------
 # INT_DIR / KIND           : target intermediate (INT_DIR has priority; fallback KIND→intm-<KIND>-ca)
-# REASON                   : unspecified|keyCompromise|CACompromise|affiliationChanged|superseded|cessationOfOperation|certificateHold|removeFromCRL|AACompromise|privilegeWithdrawn
+# REASON                   : unspecified|keyCompromise|CACompromise|affiliationChanged|superseded|cessationOfOperation|certificateHold|AACompromise|privilegeWithdrawn
 # MAP_PRIV_WITHDRAWN_TO    : mapping when REASON=privilegeWithdrawn (default: cessationOfOperation)
 # CRL_UPDATE               : 1 to regenerate CRLs (root + intermediate) after revocation (default: 0)
 # CRL_DAYS                 : days for CRL validity when CRL_UPDATE=1 (default: 7)
@@ -67,13 +69,7 @@ if ! declare -F in_csv >/dev/null 2>&1; then
 fi
 
 # Normalisation INT_DIR compatible avec le reste du toolkit
-normalize_int_dir() {
-  local v="$1"
-  if   [[ "$v" == "." ]]; then printf "."
-  elif [[ "$v" == */* ]]; then printf "%s" "$v"
-  elif [[ "$v" =~ ^intm-.*-ca$ ]]; then printf "%s" "$v"
-  else printf "intm-%s-ca" "$v"; fi
-}
+
 
 # ---------------------------
 # Resolve intermediate dir (INT_DIR > KIND)
@@ -85,6 +81,9 @@ elif [[ -n "${KIND:-}" ]]; then
   DIR="intm-${KIND}-ca"
 fi
 [[ -n "$DIR" ]] || die "Specify INT_DIR=... or KIND=..."
+DIR="$(resolve_authority "$DIR")"
+check_config "$DIR"
+check_config root
 
 info "Using intermediate: ${DIR}"
 
@@ -112,123 +111,122 @@ dbg "INT_CNF=$INT_CNF"
 dbg "INT_CERT=$INT_CERT"
 dbg "INT_INDEX=$INT_INDEX"
 
+pki_records validate "$ROOT_INDEX" >/dev/null
+pki_records validate "$INT_INDEX" >/dev/null
+
 # ---------------------------
 # Reason normalization (OpenSSL CLI does not accept 'privilegeWithdrawn')
 # ---------------------------
-case "$REASON" in
-  unspecified|keyCompromise|CACompromise|affiliationChanged|superseded|cessationOfOperation|certificateHold|removeFromCRL|AACompromise) ;;
-  privilegeWithdrawn)
-    warn "Reason 'privilegeWithdrawn' is not supported by OpenSSL CLI → mapping to '$MAP_TO'."
-    REASON="$MAP_TO"
-    ;;
-  *) die "Unsupported revocation reason: '$REASON'";;
-esac
 
-# ---------------------------
-# 1) Revoke intermediate in ROOT (idempotent)
-# ---------------------------
-info "Revoking intermediate in ROOT: $DIR (reason=$REASON)"
-if ! ossl ca -batch -config "$ROOT_CNF" -revoke "$INT_CERT" -crl_reason "$REASON"; then
-  if "$OPENSSL" ca -batch -config "$ROOT_CNF" -revoke "$INT_CERT" -crl_reason "$REASON" 2>&1 | grep -qi 'already revoked'; then
-    info "Intermediate already revoked in root DB."
+# Freeze selected rows before any mutation. Preflight all historical signers.
+PLAN="$(mktemp)"
+trap 'rm -f "$PLAN"; release_locks' EXIT
+awk -F '\t' 'BEGIN{OFS=sprintf("%c",31)} $1~/^[VRE]$/{print $1,$4,$5}' "$INT_INDEX" > "$PLAN"
+total=0; ok=0; ko=0; planned=0; completed=0
+[[ "$DRY_RUN" == 0 || "$DRY_RUN" == 1 ]] || die "DRY_RUN must be 0 or 1"
+case ",$LEAF_STATUSES," in *,,*) die "Empty LEAF_STATUSES entry" ;; esac
+IFS=',' read -r -a selected_statuses <<< "$LEAF_STATUSES"
+for selected_status in "${selected_statuses[@]}"; do
+  case "$selected_status" in V|R|E) ;; *) die "Unsupported leaf status: $selected_status" ;; esac
+done
+preflight_failed=0
+while IFS=$'\x1F' read -r pre_status pre_serial pre_file; do
+  in_csv "$pre_status" "$LEAF_STATUSES" || continue
+  [[ "$pre_status" != R ]] || continue
+  if (
+    [[ "$pre_file" != unknown ]] || pre_file="newcerts/$pre_serial.pem"
+    pre_path="$(authority_path "$DIR" "$pre_file")" || exit 1
+    [[ -f "$pre_path" ]] || die "Missing selected leaf: $pre_path"
+    resolve_leaf_issuer "$DIR" "$pre_path" || exit 1
+    check_pair "$ISSUER_CERT" "$ISSUER_KEY" || exit 1
+  ); then
+    :
   else
-    die "OpenSSL revocation failed in root DB."
+    preflight_failed=$((preflight_failed + 1))
+    echo "[PREFLIGHT] serial=$pre_serial status=failed" >&2
+  fi
+done < "$PLAN"
+if [[ "$preflight_failed" != 0 ]]; then
+  while IFS=$'\x1F' read -r status serial filename; do
+    in_csv "$status" "$LEAF_STATUSES" || continue
+    echo "[ITEM] serial=$serial status=skipped_required reason=preflight_failure" >&2
+  done < "$PLAN"
+  die "Batch preflight failed: $preflight_failed; no revocation attempted"
+fi
+
+# Do not retry OpenSSL based on an error string: inspect durable state first.
+INT_SERIAL_HEX="$(openssl_serial "$INT_CERT")"
+parent_status="$(awk -F '\t' -v s="$INT_SERIAL_HEX" '$4==s{print $1}' "$ROOT_INDEX")"
+[[ "$parent_status" == V || "$parent_status" == E || "$parent_status" == R ]] || die "Intermediate missing/ambiguous in root index"
+if [[ "$DRY_RUN" == 1 ]]; then
+  echo "[PARENT] status=planned serial=$INT_SERIAL_HEX"
+elif [[ "$parent_status" == R ]]; then
+  echo "[PARENT] status=already_completed serial=$INT_SERIAL_HEX"
+else
+  if ossl ca -batch -config "$ROOT_CNF" -revoke "$INT_CERT" -crl_reason "$REASON"; then
+    index_set_filename_for_revoked "$ROOT_INDEX" "$INT_SERIAL_HEX"
+    echo "[PARENT] status=completed serial=$INT_SERIAL_HEX"
+  else
+    echo "[PARENT] status=failed serial=$INT_SERIAL_HEX; inspect root index before retry" >&2
+    while IFS=$'\x1F' read -r status serial filename; do
+      in_csv "$status" "$LEAF_STATUSES" || continue
+      echo "[ITEM] serial=$serial status=skipped_required reason=parent_failure" >&2
+    done < "$PLAN"
+    exit 1
   fi
 fi
 
-# Guard removeFromCRL (utile seulement si intm était en certificateHold)
-INT_SERIAL_HEX="$(openssl_serial "$INT_CERT" | tr '[:lower:]' '[:upper:]')"
-[[ -n "$INT_SERIAL_HEX" ]] || die "Unable to read intermediate serial: $INT_CERT"
-
-# Normalize ROOT index: set filename=unknown for revoked serial
-dbg "Intermediate serial (root DB): ${INT_SERIAL_HEX:-<unknown>}"
-if declare -F index_set_filename_for_revoked >/dev/null 2>&1; then
-  index_set_filename_for_revoked "$ROOT_INDEX" "$INT_SERIAL_HEX" || true
-else
-  awk -v s="$INT_SERIAL_HEX" 'BEGIN{FS=OFS="\t"} { if ($1=="R" && $4==s && $5!="unknown") $5="unknown"; print }' \
-    "$ROOT_INDEX" > "$ROOT_INDEX.tmp" && mv "$ROOT_INDEX.tmp" "$ROOT_INDEX"
-fi
-info "Intermediate marked revoked in root/index.txt"
-
-# ---------------------------
-# 2) Revoke all leaf certificates issued by the intermediate
-# ---------------------------
-info "Revoking leaf certificates from ${DIR}/index.txt (statuses: $LEAF_STATUSES)…"
-
-# Use a non-whitespace separator (US, 0x1F) to preserve empty fields when reading in bash.
-awk -v US="$(printf '\x1f')" 'BEGIN{FS="\t"}
-  /^[[:space:]]*$/ || $1 ~ /^#/ { next }      # skip empty/comment lines
-  {
-    # Index layout: status expiry revocation serial filename subject(with tabs possible)
-    status=$1; expiry=$2; rev=$3; serial=$4; filename=$5;
-
-    # Rebuild subject from $6..$NF (may contain spaces or tabs)
-    subject = "";
-    if (NF >= 6) {
-      subject = $6;
-      for (i = 7; i <= NF; i++) subject = subject "\t" $i;
-    }
-
-    # Print exactly 6 fields separated by US (non-whitespace)
-    printf "%s%s%s%s%s%s%s%s%s%s%s\n", status, US, expiry, US, rev, US, serial, US, filename, US, subject;
-  }
-' "$INT_INDEX" | while IFS=$'\x1F' read -r status _expiry _revocation serial filename _subject; do
-  # Filter by status (e.g., "V" or "V,E")
-  if ! in_csv "$status" "$LEAF_STATUSES"; then
+while IFS=$'\x1F' read -r status serial filename; do
+  in_csv "$status" "$LEAF_STATUSES" || continue
+  total=$((total + 1))
+  if [[ "$status" == R ]]; then
+    completed=$((completed + 1))
+    echo "[ITEM] serial=$serial status=already_completed"
     continue
   fi
-
-  # Absolute path for filename from index; fallback to newcerts/<serial>.pem
-  cert_path="${ROOT_DIR}/${DIR}/${filename}"
-  if [[ "$filename" == "unknown" || ! -f "$cert_path" ]]; then
-    cert_path="${ROOT_DIR}/${DIR}/newcerts/${serial}.pem"
+  if [[ "$DRY_RUN" == 1 ]]; then
+    planned=$((planned + 1))
+    echo "[ITEM] serial=$serial status=planned"
+    continue
   fi
-
-  if [[ -f "$cert_path" ]]; then
-    info "  - Revoking leaf serial=$serial ($cert_path)"
-    if ! ossl ca -batch -config "$INT_CNF" -revoke "$cert_path" -crl_reason "$REASON"; then
-      if "$OPENSSL" ca -batch -config "$INT_CNF" -revoke "$cert_path" -crl_reason "$REASON" 2>&1 | grep -qi 'already revoked'; then
-        info "    -> already revoked (serial=$serial)"
-      else
-        warn "    -> OpenSSL failed for serial=$serial"
-      fi
+  [[ "$filename" != unknown ]] || filename="newcerts/$serial.pem"
+  cert_path="$(authority_path "$DIR" "$filename")"
+  resolve_leaf_issuer "$DIR" "$cert_path"
+  if ossl ca -batch -config "$INT_CNF" -cert "$ISSUER_CERT" -keyfile "$ISSUER_KEY" -revoke "$cert_path" -crl_reason "$REASON"; then
+    after_status="$(awk -F '\t' -v s="$serial" '$4==s{print $1}' "$INT_INDEX")"
+    if [[ "$after_status" == R ]] && index_set_filename_for_revoked "$INT_INDEX" "$serial"; then
+      ok=$((ok + 1))
+      echo "[ITEM] serial=$serial status=completed"
+    else
+      ko=$((ko + 1))
+      echo "[ITEM] serial=$serial status=failed reason=unexpected_database_state" >&2
     fi
-
-    # Normalize INT index: set filename=unknown for this serial if now revoked
-    awk -v s="$serial" 'BEGIN{FS=OFS="\t"} { if ($1=="R" && $4==s && $5!="unknown") $5="unknown"; print }' \
-      "$INT_INDEX" > "$INT_INDEX.tmp" && mv "$INT_INDEX.tmp" "$INT_INDEX"
   else
-    warn "  - Skipped serial=$serial (missing file: ${ROOT_DIR}/${DIR}/${filename})"
+    ko=$((ko + 1))
+    echo "[ITEM] serial=$serial status=failed reason=backend_error; inspect index before retry" >&2
   fi
-done
+done < "$PLAN"
+info "Batch result: total=$total completed=$ok already_completed=$completed planned=$planned failed=$ko"
 
 # ---------------------------
-# 3) Regenerate CRLs (optional but recommended)
-# ---------------------------
-if [[ "$CRL_UPDATE" == "1" ]]; then
-  mkdir -p "$(dirname "$ROOT_CRLPATH")" "$(dirname "$INT_CRLPATH")"
-
-  info "Regenerating Root CRL (crldays=$CRL_DAYS)…"
-  if [[ "$DRY_RUN" == "1" ]]; then
-    echo "[DRY] $OPENSSL ca -batch -config '$ROOT_CNF' -gencrl -crldays '$CRL_DAYS' -out '$ROOT_CRLPATH'"
+# 3) Refresh CRLs even for already-revoked records when requested.
+if [[ "$CRL_UPDATE" == 1 ]]; then
+  if [[ "$DRY_RUN" == 1 ]]; then
+    info "PLAN refresh root, current issuer and retained historical CRLs"
   else
-    TMP="$(mktemp -t crl.root.XXXXXX || mktemp)"
-    ossl ca -batch -config "$ROOT_CNF" -gencrl -crldays "$CRL_DAYS" -out "$TMP"
-    install -m 444 "$TMP" "$ROOT_CRLPATH"
-    rm -f "$TMP"
+    publish_crl root root/certs/ca.cert.pem root/private/ca.key.pem "$ROOT_CRLPATH" -crldays "$CRL_DAYS" \
+      || die "Revocations remain committed; Root CRL refresh failed"
+    publish_crl "$DIR" "$INT_CERT" "$DIR/private/ca.key.pem" "$INT_CRLPATH" -crldays "$CRL_DAYS" \
+      || die "Revocations remain committed; issuer CRL refresh failed"
+    for historical_cert in "$ROOT_DIR/$DIR"/generations/*/ca.cert.pem; do
+      [[ -f "$historical_cert" ]] || continue
+      historical_cert="$(authority_path "$DIR" "$historical_cert")"
+      historical_key="${historical_cert%/ca.cert.pem}/ca.key.pem"
+      historical_out="$(authority_path "$DIR" "${historical_cert%/ca.cert.pem}/ca.crl.pem")"
+      publish_crl "$DIR" "$historical_cert" "$historical_key" "$historical_out" -crldays "$CRL_DAYS" \
+        || die "Revocations remain committed; historical CRL refresh failed"
+    done
   fi
-  info "Root CRL updated: ${ROOT_CRLPATH#"$ROOT_DIR/"}"
-
-  info "Regenerating Intermediate CRL (crldays=$CRL_DAYS)…"
-  if [[ "$DRY_RUN" == "1" ]]; then
-    echo "[DRY] $OPENSSL ca -batch -config '$INT_CNF' -gencrl -crldays '$CRL_DAYS' -out '$INT_CRLPATH'"
-  else
-    TMP2="$(mktemp -t crl.intm.XXXXXX || mktemp)"
-    ossl ca -batch -config "$INT_CNF" -gencrl -crldays "$CRL_DAYS" -out "$TMP2"
-    install -m 444 "$TMP2" "$INT_CRLPATH"
-    rm -f "$TMP2"
-  fi
-  info "Intermediate CRL updated: ${INT_CRLPATH#"$ROOT_DIR/"}"
 fi
 
 # ---------------------------
@@ -243,4 +241,5 @@ else
 fi
 info "Issuance disabled for ${DIR}: created ${DISABLED_FLAG}"
 
-info "Revocation completed: intermediate + issued leaf certificates."
+if [[ "$ko" != 0 ]]; then die "Partial revocation: $ko required leaf operation(s) failed"; fi
+if [[ "$DRY_RUN" == 1 ]]; then info "Revocation plan completed"; else info "Revocation completed: intermediate + selected leaf certificates"; fi
