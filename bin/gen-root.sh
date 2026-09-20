@@ -150,6 +150,14 @@ O="$(validate_component_utf8  "O"  "$O"  "$DN_MAXLEN")"
 OU="$(validate_component_utf8 "OU" "$OU" "$DN_MAXLEN")"
 C="$(validate_country_iso "$C")"
 
+check_authority_paths root
+# Check the effective key before initializing or changing authority files.
+if [[ -s "$ROOT_DIR/root/private/ca.key.pem" ]]; then
+  assert_private_key_policy "$ROOT_DIR/root/private/ca.key.pem"
+else
+  check_key_generation_policy "$KEY_ALG" "$KEY_SIZE" "$KEY_CURVE"
+fi
+
 # ---- Layout & CNF ----
 cd "$ROOT_DIR"
 acquire_lock "root-ca"
@@ -171,7 +179,7 @@ if [[ -s "$EXISTING_CRT" ]]; then
   "$OPENSSL" x509 -in "$EXISTING_CRT" -noout >/dev/null 2>&1 \
     || die "Certificat root existant illisible/corrompu: $EXISTING_CRT"
 
-  existing_dn="$("$OPENSSL" x509 -in "$EXISTING_CRT" -noout -subject -nameopt RFC2253 \
+  existing_dn="$("$OPENSSL" x509 -in "$EXISTING_CRT" -noout -subject -nameopt RFC2253,utf8,-esc_msb \
                 | sed -n 's/^subject=\s*//;p')"
   requested_dn="$(canonical_dn_rfc2253)"
 
@@ -237,23 +245,23 @@ if [[ ! -s "$CRT_PATH" ]]; then
 
   if [[ "$QUIET_OPENSSL" == "1" ]]; then
     if [[ "$use_sha256" == "1" ]]; then
-      "$OPENSSL" req -batch -config "$REQ_CNF" -key "$KEY_PATH" -new -x509 \
+      "$OPENSSL" req -utf8 -batch -config "$REQ_CNF" -key "$KEY_PATH" -new -x509 \
         -sha256 -extensions v3_ca -days "$DAYS" -out "$ROOT_STAGED_CERT" >/dev/null 2>&1
     else
-      "$OPENSSL" req -batch -config "$REQ_CNF" -key "$KEY_PATH" -new -x509 \
+      "$OPENSSL" req -utf8 -batch -config "$REQ_CNF" -key "$KEY_PATH" -new -x509 \
         -extensions v3_ca -days "$DAYS" -out "$ROOT_STAGED_CERT" >/dev/null 2>&1
     fi
   else
     if [[ "$use_sha256" == "1" ]]; then
-      "$OPENSSL" req -batch -config "$REQ_CNF" -key "$KEY_PATH" -new -x509 \
+      "$OPENSSL" req -utf8 -batch -config "$REQ_CNF" -key "$KEY_PATH" -new -x509 \
         -sha256 -extensions v3_ca -days "$DAYS" -out "$ROOT_STAGED_CERT"
     else
-      "$OPENSSL" req -batch -config "$REQ_CNF" -key "$KEY_PATH" -new -x509 \
+      "$OPENSSL" req -utf8 -batch -config "$REQ_CNF" -key "$KEY_PATH" -new -x509 \
         -extensions v3_ca -days "$DAYS" -out "$ROOT_STAGED_CERT"
     fi
   fi
   check_pair "$ROOT_STAGED_CERT" "$KEY_PATH"
-  "$OPENSSL" verify -CAfile "$ROOT_STAGED_CERT" "$ROOT_STAGED_CERT" >/dev/null
+  "$OPENSSL" verify -auth_level 2 -CAfile "$ROOT_STAGED_CERT" "$ROOT_STAGED_CERT" >/dev/null
   staged_install "$ROOT_STAGED_CERT" "$CRT_PATH"
   rm -f "$ROOT_STAGED_CERT"
   recovery_phase certificate-installed
@@ -357,7 +365,7 @@ fi
 # Tests d’intégrité post-émission (ROOT)
 # ---------------------------
 if [[ -s "$CRT_PATH" ]]; then
-  if "$OPENSSL" verify -CAfile "$CRT_PATH" "$CRT_PATH" >/dev/null; then
+  if "$OPENSSL" verify -auth_level 2 -CAfile "$CRT_PATH" "$CRT_PATH" >/dev/null; then
     info "Vérification OK (root auto-signée)."
   else
     die  "Vérification de chaîne échouée pour la ROOT ($CRT_PATH)"

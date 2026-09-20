@@ -40,6 +40,17 @@ no operation still owns it before manual removal. There is no distributed-lock
 or hostile external-writer guarantee. Publication hooks execute while locked;
 they must not recursively invoke toolkit transactions.
 
+## Opening established authorities
+
+Layout initialization is limited to absent or empty authority directories.
+Missing index, certificate counter or CRL counter is an error on an existing
+authority, including during root/intermediate generation. Never reconstruct an
+empty database or reset a counter as an implicit repair. A key/certificate-bearing
+authority also requires its retained policy. Issuance checks numeric collisions
+against retained certificate and binding artifacts before maintenance or signing.
+These checks detect missing state and next-serial conflicts; they are not a full
+forensic reconstruction of a truncated or externally modified database.
+
 ## Commit boundaries
 
 Preflight rejection is not issuance. Configuration/layout preparation and

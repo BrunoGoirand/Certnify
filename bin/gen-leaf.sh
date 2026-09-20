@@ -229,7 +229,9 @@ C="$(validate_country_iso "$C")"
 cd "$ROOT_DIR"
 int_lock_name="$(printf '%s' "$INT_DIR" | tr '/ ' '__')"
 acquire_lock root-ca
-ensure_intermediate_layout "$INT_DIR"
+open_authority_state "$INT_DIR"
+open_authority_state root
+check_next_serial "$INT_DIR"
 
 # Always force INT_CNF to match INT_DIR
 INT_CNF="$ROOT_DIR/$INT_DIR/openssl.cnf"
@@ -264,10 +266,83 @@ authority_path "$INT_DIR" "certs/${BASE_CN}.cert.pem" >/dev/null
 # Determine policy from the key that will actually be used, before maintenance.
 effective_alg="$KEY_ALG"
 if [[ -s "$KEY_PATH" && "$FORCE_NEW_KEY" == 0 ]]; then
-  inspect_private_key_metadata "$KEY_PATH"; effective_alg="$DETECTED_KEY_ALG"
+  assert_private_key_policy "$KEY_PATH"; effective_alg="$DETECTED_KEY_ALG"
+else
+  check_key_generation_policy "$KEY_ALG" "$KEY_SIZE" "$KEY_CURVE"
 fi
 select_leaf_policy "$effective_alg"
 claim_leaf_name check
+
+# ---- Build a transient req config with DN and SAN ----
+REQ_CNF_TMP="$(mktemp)"
+REQ_CNF_DN="$(mktemp)"
+
+# 1) Start from intermediate CNF (must contain req/req_distinguished_name and placeholders)
+cp "$INT_CNF" "$REQ_CNF_TMP"
+
+# 2) Render DN placeholders and drop empty DN lines
+render_req_cnf_with_dn "$REQ_CNF_TMP" "$REQ_CNF_DN" "$C" "$O" "$OU" "$CN"
+
+# Normalize SAN lists to unique values (order-preserving)
+SAN_DNS="$(dedup_csv "${SAN_DNS}")"
+SAN_IP="$(dedup_csv "${SAN_IP}")"
+SAN_EMAIL="$(dedup_csv "${SAN_EMAIL}")"
+SAN_URI="$(dedup_csv "${SAN_URI}")"
+
+# 3) Append SAN section if provided (any of SAN_* present)
+if [[ -n "$SAN_DNS" || -n "$SAN_IP" || -n "$SAN_EMAIL" || -n "${SAN_URI:-}" ]]; then
+  {
+    echo ""
+    echo "[ certnify_request_san ]"
+    echo "subjectAltName = @certnify_request_names"
+    echo ""
+    echo "[ certnify_request_names ]"
+  } >> "$REQ_CNF_DN"
+
+  idx=1
+
+  # DNS entries
+  if [[ -n "$SAN_DNS" ]]; then
+    IFS=',' read -r -a _dns <<< "$SAN_DNS"
+    for d in "${_dns[@]}"; do
+      d="$(trim_spaces "$d")"; [[ -z "$d" ]] && continue
+      printf "DNS.%d = %s\n" "$idx" "$(cnf_quote "$d")" >> "$REQ_CNF_DN"
+      idx=$((idx + 1))
+    done
+  fi
+
+  # IP entries
+  if [[ -n "$SAN_IP" ]]; then
+    IFS=',' read -r -a _ips <<< "$SAN_IP"
+    for ip in "${_ips[@]}"; do
+      ip="$(trim_spaces "$ip")"; [[ -z "$ip" ]] && continue
+      printf "IP.%d = %s\n" "$idx" "$(cnf_quote "$ip")" >> "$REQ_CNF_DN"
+      idx=$((idx + 1))
+    done
+  fi
+
+  # Email entries
+  if [[ -n "$SAN_EMAIL" ]]; then
+    IFS=',' read -r -a _mails <<< "$SAN_EMAIL"
+    for em in "${_mails[@]}"; do
+      em="$(trim_spaces "$em")"; [[ -z "$em" ]] && continue
+      printf "email.%d = %s\n" "$idx" "$(cnf_quote "$em")" >> "$REQ_CNF_DN"
+      idx=$((idx + 1))
+    done
+  fi
+
+  # URI entries (nouveau)
+  if [[ -n "$SAN_URI" ]]; then
+    IFS=',' read -r -a _uris <<< "$SAN_URI"
+    for u in "${_uris[@]}"; do
+      u="$(trim_spaces "$u")"; [[ -z "$u" ]] && continue
+      printf "URI.%d = %s\n" "$idx" "$(cnf_quote "$u")" >> "$REQ_CNF_DN"
+      idx=$((idx + 1))
+    done
+  fi
+fi
+
+EXPECTED_SANS="$(expected_leaf_sans)" || die "Cannot validate requested/profile SANs"
 
 # ---- Preflight: block issuance if intermediate is revoked/disabled ----
 INT_CA_CERT="$INT_DIR/certs/ca.cert.pem"
@@ -309,6 +384,8 @@ if [[ -n "$ca_pub_fp" && -n "$key_pub_fp" && "$ca_pub_fp" != "$key_pub_fp" ]]; t
   die  "Refusing to sign with a mismatched CA cert/key."
 fi
 
+assert_private_key_policy "$INT_CA_KEY"
+issuance_validity "$ROOT_DIR/root/certs/ca.cert.pem" "$INT_CA_CERT"
 archive_generation "$INT_DIR"
 CURRENT_ISSUER_ID="$(certificate_id "$INT_CA_CERT")"
 [[ -z "${CERTNIFY_EXPECTED_ISSUER:-}" || "$CERTNIFY_EXPECTED_ISSUER" == "$CURRENT_ISSUER_ID" ]] || die "Authority generation changed during batch"
@@ -413,87 +490,18 @@ else
   install -m 444 "$INT_CNF" "$policy_archive"
 fi
 
-# ---- Build a transient req config with DN and SAN ----
-REQ_CNF_TMP="$(mktemp)"
-REQ_CNF_DN="$(mktemp)"
-
-# 1) Start from intermediate CNF (must contain req/req_distinguished_name and placeholders)
-cp "$INT_CNF" "$REQ_CNF_TMP"
-
-# 2) Render DN placeholders and drop empty DN lines
-render_req_cnf_with_dn "$REQ_CNF_TMP" "$REQ_CNF_DN" "$C" "$O" "$OU" "$CN"
-
-# Normalize SAN lists to unique values (order-preserving)
-SAN_DNS="$(dedup_csv "${SAN_DNS}")"
-SAN_IP="$(dedup_csv "${SAN_IP}")"
-SAN_EMAIL="$(dedup_csv "${SAN_EMAIL}")"
-SAN_URI="$(dedup_csv "${SAN_URI}")"
-
-# 3) Append SAN section if provided (any of SAN_* present)
-if [[ -n "$SAN_DNS" || -n "$SAN_IP" || -n "$SAN_EMAIL" || -n "${SAN_URI:-}" ]]; then
-  {
-    echo ""
-    echo "[ req_ext ]"
-    echo "subjectAltName = @alt_names"
-    echo ""
-    echo "[ alt_names ]"
-  } >> "$REQ_CNF_DN"
-
-  idx=1
-
-  # DNS entries
-  if [[ -n "$SAN_DNS" ]]; then
-    IFS=',' read -r -a _dns <<< "$SAN_DNS"
-    for d in "${_dns[@]}"; do
-      d="$(trim_spaces "$d")"; [[ -z "$d" ]] && continue
-      printf "DNS.%d = %s\n" "$idx" "$(cnf_quote "$d")" >> "$REQ_CNF_DN"
-      idx=$((idx + 1))
-    done
-  fi
-
-  # IP entries
-  if [[ -n "$SAN_IP" ]]; then
-    IFS=',' read -r -a _ips <<< "$SAN_IP"
-    for ip in "${_ips[@]}"; do
-      ip="$(trim_spaces "$ip")"; [[ -z "$ip" ]] && continue
-      printf "IP.%d = %s\n" "$idx" "$(cnf_quote "$ip")" >> "$REQ_CNF_DN"
-      idx=$((idx + 1))
-    done
-  fi
-
-  # Email entries
-  if [[ -n "$SAN_EMAIL" ]]; then
-    IFS=',' read -r -a _mails <<< "$SAN_EMAIL"
-    for em in "${_mails[@]}"; do
-      em="$(trim_spaces "$em")"; [[ -z "$em" ]] && continue
-      printf "email.%d = %s\n" "$idx" "$(cnf_quote "$em")" >> "$REQ_CNF_DN"
-      idx=$((idx + 1))
-    done
-  fi
-
-  # URI entries (nouveau)
-  if [[ -n "$SAN_URI" ]]; then
-    IFS=',' read -r -a _uris <<< "$SAN_URI"
-    for u in "${_uris[@]}"; do
-      u="$(trim_spaces "$u")"; [[ -z "$u" ]] && continue
-      printf "URI.%d = %s\n" "$idx" "$(cnf_quote "$u")" >> "$REQ_CNF_DN"
-      idx=$((idx + 1))
-    done
-  fi
-fi
-
 # ---- CSR ----
 info "Creating CSR for CN='${CN}' (DN: C='${C}' O='${O}' OU='${OU}')…"
 if [[ "$QUIET_OPENSSL" == "1" ]]; then
-  "$OPENSSL" req -new -sha256 \
+  "$OPENSSL" req -utf8 -new -sha256 \
     -config "$REQ_CNF_DN" \
-    ${SAN_DNS:+-reqexts req_ext} ${SAN_IP:+-reqexts req_ext} ${SAN_EMAIL:+-reqexts req_ext} ${SAN_URI:+-reqexts req_ext} \
+    ${SAN_DNS:+-reqexts certnify_request_san} ${SAN_IP:+-reqexts certnify_request_san} ${SAN_EMAIL:+-reqexts certnify_request_san} ${SAN_URI:+-reqexts certnify_request_san} \
     -key "$KEY_PATH" \
     -out "$CSR_PATH" >/dev/null 2>&1
 else
-  "$OPENSSL" req -new -sha256 \
+  "$OPENSSL" req -utf8 -new -sha256 \
     -config "$REQ_CNF_DN" \
-    ${SAN_DNS:+-reqexts req_ext} ${SAN_IP:+-reqexts req_ext} ${SAN_EMAIL:+-reqexts req_ext} ${SAN_URI:+-reqexts req_ext} \
+    ${SAN_DNS:+-reqexts certnify_request_san} ${SAN_IP:+-reqexts certnify_request_san} ${SAN_EMAIL:+-reqexts certnify_request_san} ${SAN_URI:+-reqexts certnify_request_san} \
     -key "$KEY_PATH" \
     -out "$CSR_PATH"
 fi
@@ -518,14 +526,14 @@ if [[ "$QUIET_OPENSSL" == "1" ]]; then
   "$OPENSSL" ca -batch \
     -config "$INT_CNF" \
     -extensions "$EXT_SECTION" \
-    -days "$DAYS" -notext -md sha256 \
+    -startdate "$ISSUE_NOT_BEFORE" -enddate "$ISSUE_NOT_AFTER" -notext -md sha256 \
     -in "$CSR_PATH" \
     -out "$TMPCRT" >/dev/null 2>&1
 else
   "$OPENSSL" ca -batch \
     -config "$INT_CNF" \
     -extensions "$EXT_SECTION" \
-    -days "$DAYS" -notext -md sha256 \
+    -startdate "$ISSUE_NOT_BEFORE" -enddate "$ISSUE_NOT_AFTER" -notext -md sha256 \
     -in "$CSR_PATH" \
     -out "$TMPCRT"
 fi
@@ -548,6 +556,8 @@ if [[ -n "$SERIAL_HEX_ACTUAL" && -f "$INT_INDEX" ]]; then
 fi
 
 recovery_phase "issuance-committed serial=$SERIAL_HEX_ACTUAL"
+actual_sans="$(san_names certificate "$TMPCRT")" || die "Cannot decode issued SANs; issuance committed, review required"
+[[ "$actual_sans" == "$EXPECTED_SANS" ]] || die "Issued SANs differ from the effective request; issuance committed, certificate not installed"
 bind_leaf "$INT_DIR" "$TMPCRT" "$CURRENT_ISSUER_ID"
 policy_record="$(authority_path "$INT_DIR" "issuers/$SERIAL_HEX_ACTUAL.policy")"
 [[ ! -e "$policy_record" ]] || die "Existing leaf policy record: $policy_record"
@@ -575,14 +585,6 @@ rm -f "$TMPCRT"
 chmod 444 "$CRT_PATH"
 recovery_phase certificate-installed
 info "Leaf certificate ready: $CRT_PATH"
-
-# After installing $CRT_PATH and before building the full chain / running verify
-if [[ -n "$SAN_DNS$SAN_IP$SAN_EMAIL$SAN_URI" ]]; then
-  if ! "$OPENSSL" x509 -in "$CRT_PATH" -noout -text | grep -q "Subject Alternative Name"; then
-    die "The issued certificate does not contain a SAN. Ensure '$INT_CNF' has 'copy_extensions = copy' in [CA_default], \
-or pass -extfile \"$REQ_CNF_DN\" at signing time."
-  fi
-fi
 
 # ---- Rotate: renommer les artefacts en <CN>-<SERIAL> ----
 if [[ "$ROTATE_MODE" == "1" && -n "$SERIAL_HEX_ACTUAL" ]]; then
@@ -630,7 +632,7 @@ ROOT_CRT="root/certs/ca.cert.pem"
 
 if [[ -s "$CRT_PATH" ]]; then
   # Intermédiaire en -untrusted (chaîne non ancrée), ROOT en -CAfile (ancrage de confiance)
-  if "$OPENSSL" verify -untrusted "$INT_CRT" -CAfile "$ROOT_CRT" "$CRT_PATH" >/dev/null; then
+  if "$OPENSSL" verify -auth_level 2 -untrusted "$INT_CRT" -CAfile "$ROOT_CRT" "$CRT_PATH" >/dev/null; then
     info "Vérification OK (leaf valide sous l’intermédiaire et la root)."
   else
     die  "Vérification de chaîne échouée pour le leaf ($CRT_PATH)"

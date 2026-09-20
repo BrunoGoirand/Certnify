@@ -160,7 +160,12 @@ boundaries remain exact. Larger numeric values and exhausted history fail before
 updating the counter. No truncation or removal of non-hexadecimal characters is
 performed. Leading zeros and letter case do not change serial identity.
 
-A missing counter defaults to 1000; a missing index fails. A valid existing
+Missing index.txt, serial or crlnumber on an existing authority fails without
+recreating state. Only an absent or empty authority directory initializes counters
+to 1000. A missing policy on an authority with key/certificate material requires
+explicit restoration. Numeric serial collisions with retained newcerts, issuer
+bindings/policy receipts or serial-named leaf certificates fail before issuance,
+including differences in hexadecimal case or leading zero padding. A valid existing
 counter above the index maximum is retained, including its spelling. Otherwise
 the counter advances to maximum+1, with an even number of hexadecimal digits for
 OpenSSL. The replacement is staged beside the counter. Validation failures leave

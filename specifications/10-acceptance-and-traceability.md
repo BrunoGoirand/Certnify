@@ -16,10 +16,12 @@ dependency. See [test/README.md](../test/README.md) for execution and packaging.
 | make test-stage4 | 9 | Trust/CRL errors, idempotent revocation, read-only plans, failed refresh |
 | make test-stage5 | 8 | Effective key/profile matrix, SANs, names, configuration completeness |
 | make test-stage6 | 11 | Interrupted commits, killed issuer, preserved replacements, publication resume |
+| make test-stage7 | 13 | Audit A01–A06, state loss, Make transport, key strength, SAN equality and UTF-8 |
+| make test-stage8 | 11 | Controlled cleanup, chain lifetime admission, identity/purpose/strict verification, CN-only batch and historical CRLs |
 | make test-smoke | Integration workflow | Kinds, profiles, SANs, issuance, revocation, rekey and CLI examples |
 
 The stage-numbered command names are stable test-suite identifiers, not an active
-implementation plan. The last complete behavioral qualification on 2026-09-19
+implementation plan. The historical complete behavioral qualification on 2026-09-19
 passed all 55 regression scenarios and smoke on the platform listed in chapter 09.
 This records test scope, not a guarantee for untested systems or every failure point.
 
@@ -109,6 +111,22 @@ used by these tests.
 Operational workspace PKI material is never a fixture or normative policy source.
 The root profile and all specification/guide files are explicit source-manifest entries.
 
-The shared helpers pki-state.sh, pki-records.awk, pki-policy.sh, pki-san.awk,
-pki-crl.sh and pki-recovery.sh implement the contracts across scripts.
+The shared helpers pki-state.sh, pki-records.awk, pki-policy.sh, pki-input.sh,
+pki-san.awk, pki-san-output.awk, pki-crl.sh, pki-crl-history.sh, pki-clean.sh,
+pki-validity.sh, pki-time.awk and pki-recovery.sh implement the contracts across
+scripts.
 `bin/recovery.sh` implements the report/acknowledgment interface in chapter 08.
+
+## Audit correction acceptance (2026-09-20)
+
+The A01–A06 correction suite adds semantic and failure-boundary checks to the
+original 55 scenarios. In particular, preflight refusals compare authority
+snapshots, while a post-sign SAN mismatch must retain the issued history and
+pending journal without installing the named certificate. Tests use no live PKI.
+Current execution results are recorded in AUDIT.md after validation.
+
+The routine-operation suite additionally checks cleanup preview/application,
+issuer-chain lifetime admission before mutation, explicit application identity
+and purpose, strict full-chain CRLs, person-name batch reissuance, and CRL renewal
+across retained keys and directory rollovers. Its snapshots concern disposable
+fixtures only. See AUDIT.md section 8 for current execution results.

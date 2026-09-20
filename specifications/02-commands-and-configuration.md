@@ -31,8 +31,8 @@ Run Make from the project root. The default target is `help`. Variables are stri
 | `reissue-leafs-<kind>` | `intm-reissue-leafs.sh`: consume inventory |
 | `ls-web`, `ls-auth`, `ls-code`, `ls-smime`, `ls-archive` | List certificate directory; listing failure is ignored |
 | `tree` | Display directories to depth three |
-| `test-smoke`, `test-stage0` … `test-stage6` | Run disposable integration/regression fixtures |
-| `clean` | Recursively delete `root`, `intm-*`, and `out` without confirmation |
+| `test-smoke`, `test-stage0` … `test-stage8` | Run disposable integration/regression fixtures |
+| `clean` | Preview controlled root/intm-*/out cleanup; CLEAN_APPLY=1 explicitly applies |
 
 `bin/intm-publish-final-crl.sh` and `bin/recovery.sh` are direct script operations without Make targets. `bin/gen-leaf.sh` also permits direct use. See [the guides](guides/README.md) for examples.
 
@@ -97,6 +97,20 @@ verification uses the bound issuer generation and the workspace root trust ancho
 Make continues forwarding CHAIN solely so unsupported existing use receives the
 same diagnostic instead of being silently ignored.
 
+## Parameter transport and validation
+
+Public Make parameters are frozen as literal values and exported. Recipe code
+reads shell variables; neither Make functions inside these values nor shell
+metacharacters are evaluated. Pattern target names are transported the same way.
+Make options, makefiles and the explicit ISSUE_CMD/PUBLISH_CMD hooks remain trusted
+operator code, not an untrusted-input API.
+
+Shared validation runs before lock/layout mutations. Nonempty boolean controls
+accept 0/1; FORCE_NEW_KEY also accepts rotate. DAYS, KEY_SIZE, DN_MAXLEN and CRL
+durations are positive decimal integers (at most nine digits); lock timeout,
+renewal threshold and nonempty ROOT_PATHLEN also allow zero. Empty values retain
+the documented defaults, including the special empty ROOT_PATHLEN behavior.
+
 ## Shared inputs
 
 | Input | Default | Meaning |
@@ -104,13 +118,13 @@ same diagnostic instead of being silently ignored.
 | `CN`, `C`, `O`, `OU` | operation CN; others empty | Subject fields |
 | `DN_MAXLEN` | 128 | Maximum bytes per CN/O/OU field |
 | `KEY_ALG` | RSA | RSA, EC, EdDSA, Ed25519, Ed448; normalized case/whitespace |
-| `KEY_SIZE` | 4096 | RSA modulus size, delegated to crypto backend |
+| `KEY_SIZE` | 4096 | RSA modulus size; at least 2048 bits for generation and reuse |
 | `KEY_CURVE` | prime256v1 | EC curve; also secp384r1 or secp521r1 |
 | `KEY_EDDSA` | Ed25519 | Variant when generic EdDSA is selected |
 | `DAYS` | operation-dependent | Requested certificate lifetime |
 | `ROOT_PATHLEN` | 1 | Root constraint; explicitly empty omits it |
 | `ROOT_CNF` | root/openssl.cnf | Root generator configuration path only |
-| `OPENSSL` | openssl | Backend executable, stripped/exported by Make |
+| `OPENSSL` | openssl | Backend executable passed literally through the environment |
 | `CERTNIFY_PROFILES_DIR` | workspace/profiles | Fragment source directory |
 | `QUIET_OPENSSL` | 1 in public issuance/revocation | Suppress selected backend output; toolkit logs remain |
 | `DEBUG` | 0 | Additional tracing in scripts that implement it |
@@ -142,10 +156,37 @@ S/MIME and archive modes are trimmed and lowercased; invalid modes fail even whe
 
 ## Verification, revocation, and lifecycle inputs
 
-Verification uses `FILE` or `CN`, `VERIFY_CRL=0`, and `VERIFY_MODE=normal|tolerate_revoked|info`. A nonempty `CHAIN` is rejected; issuer binding and the workspace root determine trust.
+Verification uses `FILE` or `CN`, `VERIFY_CRL=0`, and `VERIFY_MODE=normal|tolerate_revoked|info|strict`. A nonempty `CHAIN` is rejected; issuer binding and the workspace root determine trust.
 
 Revocation uses `FILE`, `SERIAL`, or `CN`, `REASON=cessationOfOperation`, `MAP_PRIV_WITHDRAWN_TO=cessationOfOperation`, and `CRL_DAYS=7`. Leaf revocation defaults `CRL_UPDATE=1`; direct intermediate/bulk scripts default it to `0`, while Make defaults all three to `1`. Bulk selection uses `LEAF_STATUSES=V`; `V,E` includes expired rows. `DRY_RUN=1` is read-only for leaf/intermediate/bulk revocation, batch reissuance and final CRL preparation. Other operations do not gain dry-run semantics from this flag.
 
 Lifecycle uses `INT_CN` for rollover (Make default `<UPPERCASE KIND> CA v2`), `LEGACY_DIR`, `ACTIVE_DIR`, `INPUT`, `OUT`, `INCLUDE_REVOKED=0`, `INCLUDE_EXPIRED=0`, `ISSUE_CMD`, `COL_SERIAL=1`, `COL_EXPIRES=2`, and `COL_CN=3`. Final CRL publication adds `CRL_DAYS=90`, optional `CRL_HOURS`, `OUT_DIR=crl`, `FINAL_MODE=1`, `ALLOW_REMAINING_LEAFS=0`, optional `PUBLISH_CMD`, `DRY_RUN=0`, and `FINAL_CRL` for resuming an existing versioned CRL. Recovery reporting uses `RECOVERY_ACTION=report` by default; acknowledgment requires `RECOVERY_ACTION=acknowledge`, the exact `RECOVERY_ID` and nonempty `RECOVERY_NOTE` (chapter 08).
 
 Most switches activate only for the literal string `1`. A replacement should validate typed options rather than silently accepting arbitrary values. Uniform validation of every option is not guaranteed by the shell interface.
+
+## Routine-operation options (step 2)
+
+- CLEAN_APPLY=0 (default): clean is a read-only preview. CLEAN_APPLY=1 revalidates
+  all candidates under the workspace lock, then deletes only listed directories.
+  Root and recognized top-level intm-* authorities must pass configuration/state
+  checks; out is the fixed generated-output directory. Symlink or non-directory
+  candidates fail; intm-* directories without openssl.cnf are preserved. Custom
+  authority paths are not discovered. DRY_RUN=1 conflicts with CLEAN_APPLY=1.
+  Deletion is sequential, not transactional: a filesystem error after an earlier
+  deletion cannot restore that directory. Backups remain an operator operation.
+- VERIFY_DNS, VERIFY_IP or VERIFY_EMAIL: at most one literal expected identity,
+  independently of the CN used to select a certificate. VERIFY_PURPOSE selects
+  sslclient, sslserver, nssslserver, smimesign, smimeencrypt, crlsign, any,
+  ocsphelper, timestampsign or codesign (backend support required).
+- VERIFY_MODE=strict requires an identity and a purpose other than any. It enables
+  full-chain CRL coverage regardless of VERIFY_CRL, requires the identity type in
+  SAN, and adds X.509 strict validation and root self-signature validation.
+- CRL_HISTORY=1 with crl-all includes root and all discovered current/retained
+  issuers, including legacy directories. With crl, it includes root and the
+  selected authority's generations. ISSUER_ID cannot be combined with this option.
+  CRL_DAYS (default 7) applies to the entire historical renewal set, including root.
+
+These new Make values use the same literal environment transport as other public
+inputs. CLEAN_APPLY and CRL_HISTORY accept only 0/1. The existing ordinary CRL and
+verification modes retain their default scope. See chapters 05–06 for validity
+refusals, strict verification and historical renewal failure boundaries.

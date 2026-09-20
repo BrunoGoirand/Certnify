@@ -7,8 +7,10 @@ CN uses exact indexed selection from chapter 03 and archived serial certificates
 with a same-serial named fallback only when appropriate. A nonempty CHAIN fails.
 The bound issuer generation is untrusted chain material and the physical workspace
 root is the trust anchor, independent of directory depth. Issuer names alone do
-not establish ownership. No hostname, email, application-purpose or historical-time
-verification option is supplied by this interface.
+not establish ownership. VERIFY_DNS, VERIFY_IP and VERIFY_EMAIL supply one explicit
+expected identity through OpenSSL's verify_hostname, verify_ip or verify_email.
+VERIFY_PURPOSE supplies an explicit application purpose; unsupported backend
+purposes fail. No historical-time verification option is supplied.
 
 ## Strict CRL verification
 
@@ -24,7 +26,8 @@ are rejected. This is a local-file contract; the toolkit does not fetch CRL URLs
 The two validated CRLs are combined into one temporary PEM bundle, supplied once
 with `-CRLfile` and `-crl_check_all`. The bundle is removed on exit.
 
-Ordinary chain validation runs independently before CRL validation of the chain,
+Ordinary chain validation explicitly uses authentication level 2 (including key
+strength checks), and runs independently before CRL validation of the chain,
 so a revocation diagnostic cannot hide an unrelated chain failure. Backend exit
 status determines success, regardless of an `OK` substring or a misleading
 filename. Only anchored numeric OpenSSL error 23 diagnostics, with no other
@@ -35,15 +38,28 @@ and backend exit status separately.
 | Mode | OK | REVOKED | ERROR from completed backend verification |
 | --- | --- | --- | --- |
 | `normal` | success | failure | failure |
+| `strict` | success | failure | failure |
 | `tolerate_revoked` | success | success | failure |
 | `info` | success | success | success (report only) |
 
 The direct verifier returns 0 for success and 2 for a mode-rejected completed
-verification or unknown mode. Make may wrap a script failure in its own status.
+verification. Unknown modes fail at input validation. Make may wrap a script failure in its own status.
 Input/preflight failures remain nonzero in **every** mode. In particular `info`
 does not waive missing/invalid required CRLs, malformed certificate input,
 unresolved issuer history, unsupported options, or invalid selectors. Report-only
 success is not evidence of certificate validity; inspect `VERIFY STATUS`.
+
+## Strict application verification
+
+VERIFY_MODE=strict requires exactly one expected identity and a specific purpose
+(other than any). It always enables full-chain CRLs, even if VERIFY_CRL=0 was
+passed. It requires the selected identity type in SAN, so CN fallback cannot
+satisfy strict verification. The ordinary and CRL backend calls both carry the
+identity/purpose checks, -x509_strict and -check_ss_sig. Every missing input,
+backend error, identity/purpose mismatch or revocation is a nonzero result.
+Normal/tolerate_revoked/info may also request identity/purpose checks, with their
+existing exit semantics; info remains report-only. Host matching and wildcard
+semantics come from OpenSSL; expected names cannot themselves contain wildcards.
 
 ## Validated CRL installation
 
@@ -148,3 +164,23 @@ display is informational, not a structured membership API.
 verify-intermediate-revoked runs verification with the root CRL: a valid unrevoked
 intermediate succeeds and a revoked one fails. Its name does not invert success.
 Ordinary CRL operations do not publish remotely or add discovery extensions.
+
+## Explicit renewal of historical coverage
+
+`make crl-all CRL_HISTORY=1 CRL_DAYS=7` renews root, canonical issuers and retained
+noncanonical generation CRLs. Discovery includes configured top-level intm-*
+authorities and legacy directories. Symlink discovery candidates fail rather than
+silently broaden scope. `make crl INT_DIR=pki-data/custom CRL_HISTORY=1` includes
+root and the selected custom authority instead; custom paths are not recursively
+discovered. Canonical generation duplicates are skipped because the current CRL
+path supplies their coverage. All retained generations are included, even expired
+ones; this operation is publication maintenance, not an authorization to issue.
+
+Preflight checks the complete selected list: configuration/index, paths, generation
+fingerprints, issuer keys and durable leaf bindings. Missing historical material
+fails before any CRL generation. Every planned output is reported. CRL_DAYS applies
+to all selected outputs, root included. ISSUER_ID and CRL_HISTORY cannot be mixed.
+Each output uses the existing validated replacement helper. A later backend or
+installation failure returns nonzero while retaining already-renewed CRLs and any
+consumed counters. There is no multi-file rollback or remote publication guarantee.
+The default crl-all behavior remains canonical intermediate CRLs without root.

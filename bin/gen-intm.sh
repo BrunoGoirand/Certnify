@@ -117,6 +117,7 @@ fi
 # ---------------------------
 # Inputs / defaults
 # ---------------------------
+KIND="${KIND:-}"
 CN="${CN:-Example Intermediate CA}"
 C="${C:-}"
 O="${O:-}"
@@ -179,6 +180,15 @@ O="$(validate_component_utf8  "O"  "$O"  "$DN_MAXLEN")"
 OU="$(validate_component_utf8 "OU" "$OU" "$DN_MAXLEN")"
 C="$(validate_country_iso "$C")"
 
+check_authority_paths root
+# Preflight the signing key and requested key policy before layout writes.
+assert_private_key_policy "$ROOT_DIR/root/private/ca.key.pem"
+if [[ "${FORCE_REUSE_KEY:-0}" == 1 && -s "$INT_DIR/private/ca.key.pem" ]]; then
+  assert_private_key_policy "$INT_DIR/private/ca.key.pem"
+else
+  check_key_generation_policy "$KEY_ALG" "$KEY_SIZE" "$KEY_CURVE"
+fi
+
 # ---------------------------
 # Layout (root must already exist)
 # ---------------------------
@@ -186,8 +196,11 @@ cd "$ROOT_DIR"
 acquire_lock "root-ca"
 int_lock_name="$(printf '%s' "$INT_DIR" | tr '/ ' '__')"
 acquire_lock root-ca
-ensure_root_layout "root"
-mkdir -p "$INT_DIR"
+open_authority_state root
+check_config root
+check_next_serial root
+check_pair root/certs/ca.cert.pem root/private/ca.key.pem
+issuance_validity root/certs/ca.cert.pem
 ensure_intermediate_layout "$INT_DIR"
 
 ROOT_ABS="$(pwd)/root"
@@ -210,7 +223,7 @@ CANON_CHAIN="$INT_DIR/certs/ca.chain.cert.pem"
 
 # Validate both histories before rekeying or invoking a database writer.
 PKI_RECORD_COUNTER="$(cat root/serial)" pki_records serial "$ROOT_INDEX" >/dev/null
-PKI_RECORD_COUNTER="$(cat "$INT_DIR/serial")" pki_records serial "$INT_DIR/index.txt" >/dev/null
+check_next_serial "$INT_DIR"
 
 # ---------------------------
 # Intermediate private key (with auto rekey if previous intm is revoked)
@@ -229,7 +242,7 @@ WANT_DN="$(canonical_dn_rfc2253)"  # uses CN/OU/O/C already normalized above
 skip_reissue=0
 HAVE_DN=""
 if [[ -f "$CANON_CERT" ]]; then
-  HAVE_DN="$("$OPENSSL" x509 -in "$CANON_CERT" -noout -subject -nameopt RFC2253 2>/dev/null | sed 's/^subject=//')"
+  HAVE_DN="$("$OPENSSL" x509 -in "$CANON_CERT" -noout -subject -nameopt RFC2253,utf8,-esc_msb 2>/dev/null | sed 's/^subject=//')"
 fi
 
 # Auto-detect if the previous canonical intermediate cert is revoked in ROOT
@@ -245,7 +258,7 @@ if [[ -f "$CANON_CERT" && -f "$ROOT_INDEX" ]]; then
 fi
 
 if [[ -s "$CANON_CERT" ]]; then
-  "$OPENSSL" verify -no_check_time -CAfile "$ROOT_DIR/root/certs/ca.cert.pem" "$CANON_CERT" >/dev/null || die "Existing intermediate issuer mismatch"
+  "$OPENSSL" verify -auth_level 2 -no_check_time -CAfile "$ROOT_DIR/root/certs/ca.cert.pem" "$CANON_CERT" >/dev/null || die "Existing intermediate issuer mismatch"
   archive_generation "$INT_DIR"
   backfill_bindings "$INT_DIR"
 fi
@@ -315,6 +328,7 @@ if [[ -f "$CANON_CERT" && -f "$KEY_PATH" && "$FORCE_REISSUE" != "1" && "$ROTATE_
     && [[ "$intm_revoked_auto" != "1" ]] \
     && [[ "$INTM_REVOKED" != "1" ]] \
     && [[ "$needs_rekey" != "1" ]]; then
+    assert_private_key_policy "$KEY_PATH"
     skip_reissue=1
   fi
 fi
@@ -322,13 +336,14 @@ fi
 if [[ "$skip_reissue" == "1" ]]; then
   info "Intermediate already exists and is still valid (DN='${HAVE_DN}') — skip. Set FORCE_REISSUE=1 or ROTATE_KEY=1 to reissue."
   check_pair "$CANON_CERT" "$KEY_PATH"
-  "$OPENSSL" verify -CAfile "$ROOT_DIR/root/certs/ca.cert.pem" "$CANON_CERT" >/dev/null || die "Existing intermediate has an invalid issuer/validity"
+  "$OPENSSL" verify -auth_level 2 -CAfile "$ROOT_DIR/root/certs/ca.cert.pem" "$CANON_CERT" >/dev/null || die "Existing intermediate has an invalid issuer/validity"
   normalize_ca_artifacts "$INT_DIR"
   write_ca_meta "$CANON_CERT" "$KEY_PATH" "$INT_DIR/ca.meta" "" "" "" "" "$DAYS" "${KIND:-}" "$INT_DIR" "" "$ROOT_DIR/root/certs/ca.cert.pem"
   recovery_complete
   exit 0
 fi
 
+[[ ! -s "$KEY_PATH" ]] || assert_private_key_policy "$KEY_PATH"
 recovery_start "intermediate authority=$INT_DIR"
 recovery_note "key=$KEY_PATH certificate=$CANON_CERT"
 if [[ ! -s "$KEY_PATH" ]]; then
@@ -349,9 +364,9 @@ render_req_cnf_with_dn "$INT_CNF" "$REQ_CNF" "$C" "$O" "$OU" "$CN"
 CSR_PATH="$INT_DIR/csr/ca.csr.pem"
 info "Creating CSR for intermediate CN='${CN}' (DN: C='${C}' O='${O}' OU='${OU}')…"
 if [[ "$QUIET_OPENSSL" == "1" ]]; then
-  "$OPENSSL" req -new -sha256 -config "$REQ_CNF" -key "$KEY_PATH" -out "$CSR_PATH" >/dev/null 2>&1
+  "$OPENSSL" req -utf8 -new -sha256 -config "$REQ_CNF" -key "$KEY_PATH" -out "$CSR_PATH" >/dev/null 2>&1
 else
-  "$OPENSSL" req -new -sha256 -config "$REQ_CNF" -key "$KEY_PATH" -out "$CSR_PATH"
+  "$OPENSSL" req -utf8 -new -sha256 -config "$REQ_CNF" -key "$KEY_PATH" -out "$CSR_PATH"
 fi
 
 # ---------------------------
@@ -365,14 +380,14 @@ if [[ "$QUIET_OPENSSL" == "1" ]]; then
   "$OPENSSL" ca -batch \
     -config "$ROOT_CNF" \
     -extensions v3_intermediate_ca \
-    -days "$DAYS" -notext -md sha256 \
+    -startdate "$ISSUE_NOT_BEFORE" -enddate "$ISSUE_NOT_AFTER" -notext -md sha256 \
     -in "$CSR_PATH" \
     -out "$TMPCRT" >/dev/null 2>&1
 else
   "$OPENSSL" ca -batch \
     -config "$ROOT_CNF" \
     -extensions v3_intermediate_ca \
-    -days "$DAYS" -notext -md sha256 \
+    -startdate "$ISSUE_NOT_BEFORE" -enddate "$ISSUE_NOT_AFTER" -notext -md sha256 \
     -in "$CSR_PATH" \
     -out "$TMPCRT"
 fi
@@ -401,7 +416,7 @@ fi
 
 recovery_phase "issuance-committed serial=$SERIAL_HEX_ACTUAL"
 check_pair "$TMPCRT" "$KEY_PATH"
-"$OPENSSL" verify -CAfile "$ROOT_DIR/root/certs/ca.cert.pem" "$TMPCRT" >/dev/null
+"$OPENSSL" verify -auth_level 2 -CAfile "$ROOT_DIR/root/certs/ca.cert.pem" "$TMPCRT" >/dev/null
 
 # Tag used to archive the previous generation (cert/chain/meta)
 last_archive_tag=""
@@ -521,7 +536,7 @@ INT_CRT="$DIR/certs/ca.cert.pem"
 [[ -s "$ROOT_CRT" ]] || die "Certificat ROOT introuvable: $ROOT_CRT"
 [[ -s "$INT_CRT"  ]] || die "Certificat INTERMÉDIAIRE introuvable: $INT_CRT"
 
-if "$OPENSSL" verify -CAfile "$ROOT_CRT" "$INT_CRT" >/dev/null; then
+if "$OPENSSL" verify -auth_level 2 -CAfile "$ROOT_CRT" "$INT_CRT" >/dev/null; then
   info "Vérification OK (intermédiaire signé par la root)."
 else
   die  "Vérification de chaîne échouée pour l’intermédiaire ($INT_CRT)"

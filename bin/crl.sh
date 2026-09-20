@@ -2,9 +2,19 @@
 # Certnify — locked CRL operations (MIT).
 set -euo pipefail
 source "$(dirname "$0")/pki-env.sh"
-pki_begin
 operation="${1:-generate}"
-if [[ "$operation" == clean ]]; then rm -rf -- root intm-* out; exit 0; fi
+if [[ "$operation" == clean ]]; then
+  source "$ROOT_DIR/bin/pki-clean.sh"
+  clean_workspace
+  exit 0
+fi
+pki_begin
+if [[ "${CRL_HISTORY:-0}" == 1 ]]; then
+  [[ "$operation" == all || "$operation" == generate ]] || die "CRL_HISTORY=1 requires crl or crl-all"
+  source "$ROOT_DIR/bin/pki-crl-history.sh"
+  renew_historical_crls
+  exit 0
+fi
 generate_crl() {
   local base="$1" tmp cert key output
   local args=()
@@ -38,7 +48,7 @@ check_config "$base"
 case "$operation" in
   generate) generate_crl "$base" ;;
   show) "$OPENSSL" crl -in "$base/crl/ca.crl.pem" -noout -text | sed -n '1,120p' ;;
-  verify-intermediate) "$OPENSSL" verify -CAfile root/certs/ca.cert.pem -crl_check -CRLfile root/crl/ca.crl.pem "$base/certs/ca.cert.pem" ;;
+  verify-intermediate) "$OPENSSL" verify -auth_level 2 -CAfile root/certs/ca.cert.pem -crl_check -CRLfile root/crl/ca.crl.pem "$base/certs/ca.cert.pem" ;;
   serial)
     serial="$(openssl_serial "$base/certs/ca.cert.pem")"
     echo "Intermediate: $base"

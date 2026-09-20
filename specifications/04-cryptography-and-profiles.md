@@ -4,7 +4,7 @@
 
 The shared library accepts version strings matching OpenSSL 1.1.1 (including letter suffixes) or OpenSSL 3.x and rejects LibreSSL. This specifies the existing executable gate, not a claim about vendor support lifetimes.
 
-RSA uses `genpkey -algorithm RSA` and a configurable bit count, default 4096. EC uses named parameters with prime256v1, secp384r1, or secp521r1 only. EdDSA uses Ed25519 or Ed448; an explicit variant in `KEY_ALG` overrides `KEY_EDDSA`. No passphrase is requested and no key encryption is configured.
+RSA uses `genpkey -algorithm RSA` and a configurable bit count, default 4096 and minimum 2048 bits. The minimum also applies to reused keys. Issuance and ordinary chain verification explicitly use OpenSSL authentication level 2. EC uses named parameters with prime256v1, secp384r1, or secp521r1 only. EdDSA uses Ed25519 or Ed448; an explicit variant in `KEY_ALG` overrides `KEY_EDDSA`. No passphrase is requested and no key encryption is configured.
 
 SHA-256 is the configured digest for RSA/EC requests and signatures. The root generator omits its explicit digest switch when the actual reused/generated key is EdDSA. Other paths still pass SHA-256 options; algorithm/backend combinations need explicit interoperability tests. The signature algorithm is determined by the signing authority's key, not the leaf public-key type.
 
@@ -14,7 +14,7 @@ A replacement must use a maintained cryptographic library or backend for key gen
 
 CN is mandatory after defaults; C, O, and OU are optional. Trim surrounding whitespace; reject control characters and consecutive ASCII spaces in CN/O/OU; enforce `DN_MAXLEN` bytes, default 128, per field. C must be exactly two uppercase ASCII letters when present; there is no membership lookup against an actual country list.
 
-The generated request DN section is ordered C, O, OU, CN, omitting empty optional entries. Requests use UTF-8-only string masking. Canonical comparison renders CN, OU, O, C in RFC2253 order with escaping for backslash, comma, plus, quote, angle brackets, semicolon, equals, leading hash, and boundary spaces. The helper name does not imply a full Unicode validation or normalization implementation.
+The generated request DN section is ordered C, O, OU, CN, omitting empty optional entries. Subject bytes must be valid UTF-8 (checked with iconv). Requests explicitly use -utf8 as well as UTF-8-only string masking. Canonical comparison renders CN, OU, O, C in RFC2253 order with escaping for backslash, comma, plus, quote, angle brackets, semicolon, leading hash, and boundary spaces. Equals signs remain literal inside values. Comparisons use RFC2253 with UTF-8 output and without high-byte escaping on both sides. No Unicode normalization or case folding is applied.
 
 The root's `policy_strict` and intermediate's `policy_loose` both require commonName and treat country, state, locality, organization, and organizational unit as optional. The root policy name does not imply that organization/country must match the issuer.
 
@@ -119,9 +119,24 @@ remain after a later failure; chapter 08 defines the recovery boundary.
 
 DN/SAN values are quoted as OpenSSL configuration data. SAN extension entries
 are emitted in DNS, IP, email, URI order with increasing indices. The intermediate
-uses copy_extensions=copy. Post-issuance checks require a SAN extension when SAN
-was requested; they do not prove exact equality with the requested SAN set.
+uses copy_extensions=copy. Before CA maintenance or key replacement, the request
+and any selected profile SAN declaration are compiled into temporary CSRs with a
+disposable EC key (never an authority key). Conflicting nonempty sets are rejected.
+A profile-only SAN becomes the effective set when the request contains none.
+Matching sets are allowed, including indirect profile SAN sections. Malformed
+backend SAN syntax fails at this preflight stage.
+
+Decoded DNS/IP/email/URI sets are compared independently of order and duplicates;
+DNS case is folded and IP spellings are normalized by OpenSSL. URI and email
+values retain case. Unsupported profile SAN types fail closed. Internal sections
+certnify_request_san, certnify_request_names and certnify_san_check are reserved;
+operator alt_names/req_ext sections cannot add names to an explicit request.
+After signing, the decoded certificate SAN set must equal the effective set before
+installing the certificate or a replacement key. A mismatch retains the pending
+journal and committed index/history for review; it never resets the serial.
 There is no domain-control proof, IDNA conversion or application authorization.
-Requested lifetime is not capped to issuer expiry. Current chain verification is
-required, but it does not establish that leaf notAfter is within issuer notAfter.
+Requested lifetime is refused if it exceeds the shortest remaining lifetime in
+the issuer chain. Current issuer validity and signing constraints are checked
+before mutation; explicit signing dates keep the emitted notAfter within that
+limit. No silent lifetime reduction is applied (chapter 05).
 See chapter 10 for semantic tests rather than byte-for-byte signature comparison.

@@ -6,8 +6,13 @@ pki_begin
 : "${KIND:?KIND required}"
 : "${INT_CN:?INT_CN required}"
 : "${DAYS:=3650}"; : "${KEY_ALG:=EC}"; : "${KEY_CURVE:=secp384r1}"
+normalize_key_request
+check_key_generation_policy "$KEY_ALG" "${KEY_SIZE:-4096}" "$KEY_CURVE"
 check_config root
+check_next_serial root
+assert_private_key_policy root/private/ca.key.pem
 check_pair root/certs/ca.cert.pem root/private/ca.key.pem
+issuance_validity root/certs/ca.cert.pem
 BASE_DIR="$(resolve_authority "intm-${KIND}-ca")"
 # The active name must be a real directory, never move an alias instead of its target.
 [[ "$BASE_DIR" == "intm-${KIND}-ca" && ! -L "$BASE_DIR" ]] || die "Rollover requires a canonical active directory"

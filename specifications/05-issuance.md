@@ -5,10 +5,34 @@ Subject, SAN, profile and storage rules are defined in chapters 03–04. Success
 completion includes required validation; a nonzero result after signing does not
 imply rollback. No serial or committed issuance record is reset after failure.
 
+## Issuer validity and duration admission
+
+Before intermediate initialization/rekey or leaf maintenance/key replacement,
+validate the issuer chain at the current time, root self-signature, cryptographic
+strength and CA/signing constraints. Check the root for an intermediate and both
+root and intermediate for a leaf. Rollover performs the root check before moving
+its active directory. Existing disabled/revoked-issuer controls remain in force.
+
+DAYS must fit within the earliest notAfter among those certificates. A refusal
+names the limiting certificate, its UTC expiry and maximum whole-day DAYS value.
+The command does not cap the request. The start and end UTC instants are fixed
+at preflight and passed explicitly to OpenSSL, avoiding an overrun caused by
+key generation or signing delay. Date conversion is portable AWK, with Gregorian
+leap-year handling; no Python runtime or platform-specific date parsing is used.
+
+This intentionally changes admission for existing workflows: a 3650-day leaf
+requested after creation of a 3650-day intermediate is too long. Select a smaller
+DAYS value or renew the issuer with appropriate validity. Even a repeated
+intermediate request must pass this admission before the no-op/rekey decision.
+Root self-signing has no parent lifetime to constrain it. No existing certificate
+is shortened or rewritten by these checks.
+
 ## Root
 
-1. Resolve defaults and validate the subject; initialize missing layout/counters
-   and create or validate the selected root configuration.
+1. Resolve defaults, validate the UTF-8 subject and effective key policy. Initialize
+   layout/counters only in an absent or empty authority directory; an existing
+   authority must retain its database, counters and required directories. Create
+   or validate the selected root configuration; missing established policy fails.
 2. If a certificate exists, require a readable certificate with the requested
    RFC2253 DN and its original matching private key. A missing key fails instead
    of generating a replacement for the existing certificate.
@@ -62,7 +86,10 @@ Historical leaves retain their original cryptographic issuer binding.
    ALLOW_SIGN_WITH_REVOKED_INT=1, refuse disabled or root-revoked intermediates.
    Batch issuance also checks its pinned expected issuer identity.
 2. Inspect a reused key before selecting its compatible default/explicit profile.
-   Validate name-map compatibility and index/counter input before key replacement.
+   Validate name-map compatibility, complete authority state and retained serial
+   collisions before key replacement. Compile the effective SAN request and reject
+   conflicting profile SANs before CA maintenance. RSA must have at least 2048 bits;
+   reused keys are subject to the same policy.
 3. Run requested expiry maintenance and optional CRL refresh; either failure aborts.
    Unless ALLOW_DUPLICATE_CN=1, refuse exact CN matches that are V and unexpired,
    reporting their serials and locators. Key rotation does not bypass this rule.
@@ -71,15 +98,17 @@ Historical leaves retain their original cryptographic issuer binding.
    leaving the canonical key until signing succeeds. With rotate, prepare new
    rot- namespace artifacts without replacing the canonical artifacts.
 5. Inspect the actual key again, validate its profile, retain the exact policy
-   snapshot, render the DN/SAN request and create the CSR.
+   snapshot and create the CSR from the preflighted UTF-8 DN/SAN configuration.
 6. Raise the next serial to avoid history collisions and require 1–16 hex digits.
    Journal the expected serial and temporary output, then sign through the
    intermediate database. Read the returned certificate serial and normalize its
    newcerts locator. A backend failure here leaves an uncertain recovery outcome.
-7. Persist issuer binding and policy reference. Select a free canonical or
+7. Compare the decoded issued SAN set with the preflighted effective set; a
+   mismatch leaves committed history and a pending journal, without installation.
+   Persist issuer binding and policy reference. Select a free canonical or
    `srl-<serial>-<stem>` certificate destination; never overwrite an occupied serial
    destination. Check the issued pair and install the forced replacement key,
-   when applicable, then the certificate. Require a SAN extension if requested.
+   when applicable, then the certificate.
 8. For rotate, rename key/CSR/certificate into the serial namespace. Build the
    leaf+intermediate fullchain, verify against the workspace root and complete
    the journal. No failed post-check undoes the issuance database commit.

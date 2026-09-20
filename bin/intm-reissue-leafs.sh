@@ -221,7 +221,11 @@ while IFS=$'\x1F' read -r serial expires cn; do
   if [[ -n "${ISSUE_CMD:-}" ]]; then
     CN="$cn" SERIAL="$serial" EXPIRES="$expires" INT_DIR="$ACTIVE_DIR" bash -c "$ISSUE_CMD" || rc=$?
   else
-    case "$KIND" in web) row_san="DNS:$cn" ;; auth|user|smime) row_san="email:$cn" ;; *) row_san="" ;; esac
+    row_san=""
+    case "$KIND" in
+      web) row_san="DNS:$cn" ;;
+      auth|user|smime) [[ "$cn" != *@* ]] || row_san="email:$cn" ;;
+    esac
     CN="$cn" SERIAL="$serial" EXPIRES="$expires" INT_DIR="$ACTIVE_DIR" \
       SAN="$row_san" DAYS="${DAYS:-$DEFAULT_DAYS}" "$ISSUE_SCRIPT" || rc=$?
   fi

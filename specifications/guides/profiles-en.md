@@ -12,8 +12,8 @@ make user CN=user@example.test KEY_ALG=Ed25519
 make code CN="Signing Key" KEY_ALG=EC
 make email CN=user@example.test SMIME_MODE=sign KEY_ALG=EC
 make email CN=encrypt@example.test SMIME_MODE=encrypt KEY_ALG=RSA
-make archive CN="Document Seal" ARCHIVE_MODE=seal KEY_ALG=EC
-make archive CN="Timestamp Signer" ARCHIVE_MODE=timestamp KEY_ALG=EC
+make archive CN="Document Seal" ARCHIVE_MODE=seal KEY_ALG=EC DAYS=3600
+make archive CN="Timestamp Signer" ARCHIVE_MODE=timestamp KEY_ALG=EC DAYS=3600
 ```
 
 Server/client defaults follow the actual key, including reused keys. Encryption

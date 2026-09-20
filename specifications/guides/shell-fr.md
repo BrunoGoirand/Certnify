@@ -37,3 +37,35 @@ Voir aussi `profiles-fr.md` pour la référence des profils OpenSSL utilisés pa
 - Les dépendances listées ici sont les principales dépendances visibles dans les scripts ; elles ne prétendent pas être une matrice exhaustive commande par commande.
 
 Voir les [commandes et valeurs par défaut](../02-commands-and-configuration.md) et le [guide de reprise](recovery-fr.md).
+
+## Contrôles ajoutés après audit
+
+`pki-input.sh` valide les options scalaires avant mutation. `pki-state.sh` refuse
+un état existant incomplet sans recréer les bases ou compteurs. `pki-policy.sh`
+contrôle la force des clés générées/réutilisées et compare les SAN prévus et émis
+avec `pki-san-output.awk`. La validation UTF-8 exige `iconv` ; les ensembles de SAN
+utilisent `sort`. Leur compilation préalable emploie des CSR et une clé temporaire,
+jamais une clé d’autorité.
+
+## Opérations courantes renforcées
+
+- `make clean` affiche un aperçu. `CLEAN_APPLY=1` applique la suppression après
+  examen des chemins et sauvegarde si nécessaire ; clés et historiques sont
+  inclus. Un candidat symbolique ou une autorité reconnue incomplète bloque le plan.
+- L’émission refuse les émetteurs invalides et les durées DAYS dépassant la chaîne.
+  Le message précise le maximum permis. Aucun certificat existant n’est modifié.
+  `pki-validity.sh` et `pki-time.awk` assurent ce contrôle avant mutation.
+- Exemple strict, sur une seule ligne : `make verify KIND=web CN=app.example.test
+  VERIFY_MODE=strict VERIFY_DNS=app.example.test VERIFY_PURPOSE=sslserver`.
+  Ce mode exige le SAN attendu, l’usage et les CRL locales de toute la chaîne.
+  VERIFY_IP et VERIFY_EMAIL permettent les autres types d’identité.
+- `make crl-all CRL_HISTORY=1` renouvelle les CRL de la racine et des émetteurs
+  courants/historiques découverts. Pour un chemin personnalisé, utiliser sur une
+  ligne `make crl INT_DIR=pki-data/custom CRL_HISTORY=1`. Les anciennes clés doivent
+  être conservées. Il n’y a ni récupération de clés ni publication distante.
+- Le batch reste une réémission limitée au CN et l’annonce. Un nom de personne
+  sans @ ne reçoit plus artificiellement un SAN email.
+
+`pki-clean.sh` contrôle le nettoyage ; `pki-crl-history.sh` prépare les CRL à
+renouveler. Leur remplacement est individuel : un échec tardif peut laisser des
+renouvellements déjà acquis. Voir les chapitres 02, 05 et 06 pour les contrats.

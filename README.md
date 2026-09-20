@@ -32,7 +32,7 @@ multi-file transaction, automatic crash repair or power-loss durability guarante
 ## Requirements
 
 Run commands from the project root with Bash, Make, OpenSSL and ordinary Unix
-utilities (`awk`, `sed`, `grep`, `mktemp`, `install`, `date`, `od`, `tr`, and file tools).
+utilities (`awk`, `sed`, `grep`, `mktemp`, `install`, `date`, `od`, `tr`, `iconv`, `sort`, and file tools).
 The backend gate accepts OpenSSL 1.1.1 or 3.x and rejects LibreSSL. Select another
 executable with `OPENSSL=/absolute/path/to/openssl`.
 
@@ -89,8 +89,8 @@ make user CN="alice@example.test" KEY_ALG=Ed25519
 make code CN="Release Signing Key" KEY_ALG=Ed25519
 make email CN="signer@example.test" SMIME_MODE=sign KEY_ALG=EC
 make email CN="encrypt@example.test" SMIME_MODE=encrypt KEY_ALG=RSA
-make archive CN="Document Seal" ARCHIVE_MODE=seal
-make archive CN="Timestamp Signer" ARCHIVE_MODE=timestamp
+make archive CN="Document Seal" ARCHIVE_MODE=seal DAYS=3600
+make archive CN="Timestamp Signer" ARCHIVE_MODE=timestamp DAYS=3600
 ```
 
 `SMIME_MODE=combined` (or `legacy`) selects `smime`; `sign` selects `smime_sign`;
@@ -103,10 +103,10 @@ Explicit incompatible key/profile combinations fail.
 | --- | --- |
 | `CN`, `C`, `O`, `OU` | Subject fields; country/organization/unit optional |
 | `KEY_ALG` | RSA (default), EC, EdDSA, Ed25519 or Ed448 |
-| `KEY_SIZE` | RSA bits, default 4096 |
+| `KEY_SIZE` | RSA bits, default 4096, minimum 2048 |
 | `KEY_CURVE` | prime256v1 (default), secp384r1 or secp521r1 |
 | `KEY_EDDSA` | Ed25519 (default) or Ed448 for generic EdDSA |
-| `DAYS` | Requested validity; not automatically capped to issuer expiry |
+| `DAYS` | Requested validity; refused if it exceeds the remaining chain validity |
 | `INT_DIR`, `KIND` | Explicit directory takes precedence over kind, then action defaults |
 | `PROFILE`, `EXT_SECTION` | Explicit installed profile; EXT_SECTION takes precedence |
 | `SAN_DNS`, `SAN_IP`, `SAN_EMAIL`, `SAN_URI` | Comma-separated typed lists |
@@ -122,7 +122,9 @@ control intermediate renewal/rekeying; see the [issuance contract](specification
 
 Any explicit nonempty SAN list suppresses the implicit CN SAN. Without one,
 servers get DNS:CN; user/email actions get email:CN when CN contains `@`.
-Malformed entries fail rather than being discarded. Quote values in your shell.
+Malformed entries fail rather than being discarded. A profile SAN conflicting
+with the request is rejected before signing; the issued SAN set is checked before
+installation. Subject fields use validated UTF-8. Quote values in your shell.
 
 Fragments in `profiles/` compose **new** authority configurations. Editing those
 fragments does not update an existing `openssl.cnf`: retain and review the installed
@@ -144,7 +146,8 @@ make revoke KIND=web CN="app.example.test" REASON=keyCompromise
 CN lookup requires one exact active match, or one unambiguous historical match.
 Use FILE when ambiguous; revocation also accepts SERIAL. A nonempty CHAIN override
 is rejected. Verification uses the certificate's bound issuer generation and workspace
-root. It does not check hostname or application purpose.
+root. Add one of `VERIFY_DNS`, `VERIFY_IP`, or `VERIFY_EMAIL` for an expected
+identity, and `VERIFY_PURPOSE` for the application purpose.
 
 `VERIFY_CRL=1` requires valid root **and** issuer CRLs, including the historical
 issuer CRL when applicable. Missing, stale or invalid required CRLs fail.
@@ -152,11 +155,29 @@ issuer CRL when applicable. Missing, stale or invalid required CRLs fail.
 | VERIFY_MODE | Valid | Revoked | Other completed verification error |
 | --- | --- | --- | --- |
 | normal | Success | Failure | Failure |
+| strict | Success | Failure | Failure |
 | tolerate_revoked | Success | Success | Failure |
 | info | Success | Success | Success, report only |
 
 Preflight errors fail in every mode. In info mode, read `VERIFY STATUS`; exit zero
 is not proof of validity. Default verification does not check revocation.
+
+For automation, `VERIFY_MODE=strict` requires one expected SAN identity and a
+specific purpose, enforces strict X.509 validation and full-chain CRL coverage,
+and returns nonzero on any failure. `VERIFY_CRL=0` cannot disable strict coverage.
+For example, after renewing the required CRLs:
+
+```sh
+make crl KIND=web CRL_HISTORY=1
+make verify KIND=web CN=app.example.test VERIFY_MODE=strict \
+  VERIFY_DNS=app.example.test VERIFY_PURPOSE=sslserver
+make verify KIND=smime CN=user@example.test \
+  VERIFY_EMAIL=user@example.test VERIFY_PURPOSE=smimesign
+```
+
+Purpose names are OpenSSL names, such as sslserver, sslclient, smimesign,
+smimeencrypt and timestampsign. Backend-specific purposes (such as codesign)
+fail if unsupported by the selected OpenSSL version.
 
 ```sh
 make crl-root
@@ -178,7 +199,12 @@ Release from hold (`removeFromCRL`) is unsupported.
 
 `crl-root` uses configured CRL validity, normally seven days; CRL_DAYS controls
 intermediate generation. `crl-all` includes matching legacy directories and excludes
-root. No CRL URLs are fetched or automatically added to certificate extensions.
+root by default. `make crl-all CRL_HISTORY=1 CRL_DAYS=7` explicitly renews root,
+canonical intermediate and retained generation CRLs, including legacy directories.
+`make crl KIND=web CRL_HISTORY=1` limits intermediate discovery to that authority
+and also renews root. Custom authority paths must be selected explicitly.
+The whole set is preflighted, but installation is per file: a later failure can
+leave earlier CRLs renewed and counters advanced. No CRL URLs are fetched or automatically added to certificate extensions.
 `verify-intermediate-revoked` fails for a revoked intermediate; it does not invert
 verification success. Inspection helpers include `show-intermediate-serial` and
 `crl-root-revoked` with an explicit authority selector.
@@ -229,6 +255,12 @@ names. See the [storage specification](specifications/03-persistence-and-artifac
 Custom data locations should use `pki-data/` or an explicit local Git exclusion.
 Configurations contain absolute bindings; moving a workspace requires reviewed rebinding.
 
+An existing authority with missing database/counters is refused without recreating
+state. Restore and reconcile its retained files explicitly; never reset counters.
+RSA generation/reuse requires at least 2048 bits, and chain verification enforces
+authentication level 2. Older weak keys/certificates require an explicit migration;
+these checks do not replace or revoke existing material.
+
 Toolkit transactions share `.locks/root-ca.lock`. An interrupted issuance or move
 can leave `.recovery/pending`, which blocks further locked operations until reviewed:
 
@@ -248,7 +280,7 @@ commit boundaries, stale locks and manual recovery.
 make help
 make tree
 make ls-web
-make test-stage0 test-stage1 test-stage2 test-stage3 test-stage4 test-stage5 test-stage6
+make test-stage0 test-stage1 test-stage2 test-stage3 test-stage4 test-stage5 test-stage6 test-stage7 test-stage8
 make test-smoke
 ```
 
@@ -257,9 +289,21 @@ fixture keys. The suites cover parsing, policies, concurrency, revocation and in
 failures; publication uses local stubs. See [test/README.md](test/README.md) for execution
 and [acceptance coverage](specifications/10-acceptance-and-traceability.md) for limits.
 
-`make clean` deletes `root`, matching `intm-*` paths and `out` without confirmation,
-including their keys and histories. It is not routine cache cleanup or recovery and
-does not reset arbitrary custom authority paths or recovery journals.
+`make clean` now previews only, without a workspace mutation. After checking the
+listed paths and taking any required backup, `make clean CLEAN_APPLY=1` deletes
+root, recognized top-level intm-* authorities and out, including keys and history.
+The entire plan is revalidated under lock. Symlink candidates and incomplete
+recognized authorities are refused; unrelated intm-* directories are preserved.
+Custom authority paths and recovery journals are outside this cleanup scope.
+Cleanup validates local authority state without interpreting OpenSSL configuration
+paths or policies, so stale paths after a workspace move do not block it.
+CLEAN_APPLY=1 with DRY_RUN=1 is rejected.
+
+Compatibility: issuance now refuses an invalid issuer or DAYS exceeding the
+shortest chain lifetime, reporting the limiting expiry and maximum whole days.
+For example, use `make archive CN="Records Seal" DAYS=3600` when the archive CA
+has enough remaining validity; a 3650-day CA cannot issue a 3650-day leaf later.
+No duration is silently capped. Existing certificates and keys are not migrated.
 
 ## Documentation
 

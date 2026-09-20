@@ -96,7 +96,7 @@ run_make int-web CN="Smoke Web CA"
 run_make int-auth CN="Smoke Auth CA"
 run_make int-code CN="Smoke Code CA"
 run_make int-smime CN="Smoke S/MIME CA"
-run_make int-archive CN="Smoke Archive CA"
+run_make int-archive CN="Smoke Archive CA" DAYS=4000
 
 run_make server CN="app.example.test"
 run_make server CN="api.example.test" KEY_ALG="EC" KEY_CURVE="secp384r1" SAN_URI="spiffe://certnify/api"

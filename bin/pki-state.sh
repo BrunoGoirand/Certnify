@@ -60,9 +60,71 @@ check_config() {
   local base="$1" cnf="${2:-$1/openssl.cnf}"
   [[ "$base" == /* ]] || base="$ROOT_DIR/$base"
   check_authority_paths "$base"
+  open_authority_state "$base"
+  [[ "$base" == "$ROOT_DIR/root" || -d "$base/csr" ]] || die "Incomplete authority: missing $base/csr"
   [[ -f "$cnf" ]] || die "Missing configuration: $cnf"
   PKI_CONFIG_BASE="$base" LC_ALL=C awk -f "$ROOT_DIR/bin/pki-config.awk" "$cnf" >/dev/null
   validate_policy_config "$cnf" "$base"
+}
+
+# Opening an existing authority never reconstructs missing issuer state.
+open_authority_state() {
+  local base="$1" item counter
+  check_authority_paths "$base"
+  for item in index.txt serial crlnumber; do
+    [[ -f "$base/$item" ]] || die "Incomplete authority: missing $base/$item; reconcile retained state explicitly"
+  done
+  for item in certs crl newcerts private; do
+    [[ -d "$base/$item" ]] || die "Incomplete authority: missing directory $base/$item"
+  done
+  counter="$(cat "$base/serial")"
+  PKI_RECORD_COUNTER="$counter" pki_records serial "$base/index.txt" >/dev/null
+  counter="$(cat "$base/crlnumber")"
+  [[ "$counter" =~ ^[0-9A-Fa-f]+$ && ${#counter} -le 16 ]] || die "Invalid CRL counter: $base/crlnumber"
+}
+
+initialize_authority_layout() {
+  local base="$1" kind="$2" entry occupied=0
+  check_authority_paths "$base"
+  for entry in "$base"/* "$base"/.[!.]* "$base"/..?*; do
+    if [[ -e "$entry" || -L "$entry" ]]; then occupied=1; break; fi
+  done
+  if [[ "$occupied" == 1 ]]; then
+    open_authority_state "$base"
+    [[ "$kind" == root || -d "$base/csr" ]] || die "Incomplete authority: missing $base/csr"
+    return 0
+  fi
+  mkdir -p "$base"/{certs,crl,newcerts,private}
+  [[ "$kind" == root ]] || mkdir -p "$base/csr"
+  : > "$base/index.txt"
+  printf '1000\n' > "$base/serial"
+  printf '1000\n' > "$base/crlnumber"
+}
+
+# Check retained numeric serial identities before maintenance, keys or signing.
+check_next_serial() {
+  local base="$1" current path name serial
+  [[ -f "$base/index.txt" && -s "$base/serial" ]] || die "Missing issuer state: $base/index.txt or $base/serial"
+  current="$(cat "$base/serial")"
+  PKI_NEXT_SERIAL="$(PKI_RECORD_COUNTER="$current" pki_records serial "$base/index.txt")" || return 1
+  # One parser for the whole directory inventory, not one process per artifact.
+  for path in "$base"/newcerts/*.pem "$base"/issuers/* "$base"/certs/srl-*.cert.pem; do
+    [[ -e "$path" || -L "$path" ]] || continue
+    name="${path##*/}"
+    case "${path%/*}" in
+      "$base/newcerts") serial="${name%.pem}" ;;
+      "$base/issuers") serial="${name%.policy}" ;;
+      "$base/certs") serial="${name#srl-}"; serial="${serial%%-*}" ;;
+    esac
+    [[ "$serial" =~ ^[0-9A-Fa-f]+$ ]] || continue
+    printf '%s\t%s\n' "$serial" "$path"
+  done | PKI_NEXT_SERIAL_VALUE="$PKI_NEXT_SERIAL" LC_ALL=C awk '
+    function canonical(v) {v=toupper(v); sub(/^0+/,"",v); return "s" (v=="" ? "0" : v)}
+    BEGIN {FS="\t"; wanted=canonical(ENVIRON["PKI_NEXT_SERIAL_VALUE"])}
+    canonical($1)==wanted {print "[ERR] Serial collision with retained history: " $2 > "/dev/stderr"; bad=1}
+    END {exit bad}
+  ' || die "Serial $PKI_NEXT_SERIAL is not available; reconcile before signing"
+  authority_path "$base" "newcerts/$PKI_NEXT_SERIAL.pem" >/dev/null
 }
 
 rebind_config() {

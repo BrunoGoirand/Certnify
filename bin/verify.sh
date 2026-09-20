@@ -17,7 +17,9 @@
 # - Priorité de ciblage : INT_DIR > KIND (INT_DIR est normalisé : "internet" → "intm-internet-ca")
 # - Vérif : root en -CAfile (ancre) + intermédiaire en -untrusted (chaîne)
 # - VERIFY_CRL=1 requires valid issuer and root CRLs with full-chain coverage
-# - VERIFY_MODE = normal | tolerate_revoked | info
+# - VERIFY_MODE = normal | tolerate_revoked | info | strict
+# - VERIFY_DNS / VERIFY_IP / VERIFY_EMAIL: one explicit expected identity
+# - VERIFY_PURPOSE: explicit OpenSSL application purpose
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -68,7 +70,29 @@ check_config root
 CN="${CN:-}"                          # ex: CN=app.example.com (optionnel si FILE est fourni)
 FILE="${FILE:-}"                      # ex: FILE=certs/app.example.com.cert.pem
 VERIFY_CRL="${VERIFY_CRL:-0}"         # 1 pour activer la vérif CRL
-VERIFY_MODE="${VERIFY_MODE:-normal}"  # normal | tolerate_revoked | info
+VERIFY_MODE="${VERIFY_MODE:-normal}"  # normal | tolerate_revoked | info | strict
+identity_count=0
+identity_type=''
+identity_value=''
+for identity_type_candidate in DNS IP EMAIL; do
+  variable="VERIFY_$identity_type_candidate"
+  value="${!variable-}"
+  [[ -n "$value" ]] || continue
+  [[ "$value" != *,* && "$value" != *'*'* ]] || die "$variable expects one literal identity"
+  normalized="$(PKI_SAN_TYPE="$identity_type_candidate" PKI_SAN_VALUES="$value" LC_ALL=C awk -f "$ROOT_DIR/bin/pki-san.awk")"
+  [[ "$normalized" == "$value" ]] || die "$variable must be a single normalized identity"
+  identity_count=$((identity_count+1)); identity_type="$identity_type_candidate"; identity_value="$value"
+done
+(( identity_count <= 1 )) || die "Specify only one of VERIFY_DNS, VERIFY_IP or VERIFY_EMAIL"
+case "${VERIFY_PURPOSE:-}" in
+  ''|sslclient|sslserver|nssslserver|smimesign|smimeencrypt|crlsign|any|ocsphelper|timestampsign|codesign) ;;
+  *) die "Unsupported VERIFY_PURPOSE: $VERIFY_PURPOSE" ;;
+esac
+if [[ "$VERIFY_MODE" == strict ]]; then
+  [[ "$identity_count" == 1 && -n "${VERIFY_PURPOSE:-}" && "$VERIFY_PURPOSE" != any ]] || die "VERIFY_MODE=strict requires one expected identity and a specific VERIFY_PURPOSE"
+  VERIFY_CRL=1
+  info "Strict verification: full-chain CRLs, expected SAN identity and application purpose required"
+fi
 
 info "Using intermediate: ${CA_DIR}"
 assert_intermediate_ready
@@ -105,9 +129,25 @@ INT_CRT="$ISSUER_CERT"
 # Construction des arguments openssl verify
 # ---------------------------
 
-case "$VERIFY_MODE" in normal|tolerate_revoked|info) ;; *) die "Unknown VERIFY_MODE: $VERIFY_MODE" ;; esac
+case "$VERIFY_MODE" in normal|tolerate_revoked|info|strict) ;; *) die "Unknown VERIFY_MODE: $VERIFY_MODE" ;; esac
 [[ "$VERIFY_CRL" == 0 || "$VERIFY_CRL" == 1 ]] || die "VERIFY_CRL must be 0 or 1"
-args=( -CAfile "$ROOT_CRT" -no-CApath -untrusted "$INT_CRT" )
+args=( -auth_level 2 -CAfile "$ROOT_CRT" -no-CApath -untrusted "$INT_CRT" )
+[[ -z "${VERIFY_PURPOSE:-}" ]] || args+=(-purpose "$VERIFY_PURPOSE")
+case "$identity_type" in
+  DNS) args+=(-verify_hostname "$identity_value") ;;
+  IP) args+=(-verify_ip "$identity_value") ;;
+  EMAIL) args+=(-verify_email "$identity_value") ;;
+esac
+if [[ "$VERIFY_MODE" == strict ]]; then
+  args+=(-x509_strict -check_ss_sig)
+  # Require the requested identity type in SAN; strict mode never relies on CN.
+  identity_prefix="$identity_type"; [[ "$identity_type" != EMAIL ]] || identity_prefix=email
+  decoded_sans="$(san_names certificate "$FILE")" || die "Cannot decode certificate SANs"
+  printf '%s\n' "$decoded_sans" | PKI_EXPECTED_TYPE="$identity_prefix" awk '
+    index($0,ENVIRON["PKI_EXPECTED_TYPE"] ":")==1 {found=1}
+    END {exit !found}
+  ' || die "Strict verification requires a $identity_type SAN"
+fi
 bundle=""
 trap '[[ -z "$bundle" ]] || rm -f "$bundle"; release_locks' EXIT
 if [[ "$VERIFY_CRL" == 1 ]]; then
@@ -151,7 +191,7 @@ if ! "$OPENSSL" x509 -noout -text -in "$FILE" | awk 'BEGIN{p=0}/X509v3 extension
 info "VERIFY STATUS: $status"
 info "Backend exit status: $rc"
 case "$VERIFY_MODE" in
-  normal) [[ "$status" == OK ]] ;;
+  normal|strict) [[ "$status" == OK ]] ;;
   tolerate_revoked) [[ "$status" == OK || "$status" == REVOKED ]] ;;
   info) exit 0 ;;
 esac && exit 0

@@ -36,8 +36,8 @@ n’est garantie.
 ## Prérequis
 
 Exécuter les commandes depuis la racine du projet avec Bash, Make, OpenSSL et les
-utilitaires Unix usuels (`awk`, `sed`, `grep`, `mktemp`, `install`, `date`, `od`, `tr`
-et outils de fichiers). Le contrôle de version accepte OpenSSL 1.1.1 ou 3.x et refuse
+utilitaires Unix usuels (`awk`, `sed`, `grep`, `mktemp`, `install`, `date`, `od`, `tr`,
+`iconv`, `sort` et outils de fichiers). Le contrôle de version accepte OpenSSL 1.1.1 ou 3.x et refuse
 LibreSSL. Choisir un autre exécutable avec `OPENSSL=/chemin/absolu/vers/openssl`.
 
 L’environnement qualifié est macOS, Bash 3.2.57, GNU Make 3.81 et OpenSSL 3.6.4.
@@ -95,8 +95,8 @@ make user CN="alice@example.test" KEY_ALG=Ed25519
 make code CN="Release Signing Key" KEY_ALG=Ed25519
 make email CN="signer@example.test" SMIME_MODE=sign KEY_ALG=EC
 make email CN="encrypt@example.test" SMIME_MODE=encrypt KEY_ALG=RSA
-make archive CN="Document Seal" ARCHIVE_MODE=seal
-make archive CN="Timestamp Signer" ARCHIVE_MODE=timestamp
+make archive CN="Document Seal" ARCHIVE_MODE=seal DAYS=3600
+make archive CN="Timestamp Signer" ARCHIVE_MODE=timestamp DAYS=3600
 ```
 
 `SMIME_MODE=combined` (ou `legacy`) sélectionne `smime` ; `sign` sélectionne
@@ -110,10 +110,10 @@ de clé et de profil incompatibles sont refusées.
 | --- | --- |
 | `CN`, `C`, `O`, `OU` | Identité ; pays, organisation et unité facultatifs |
 | `KEY_ALG` | RSA (défaut), EC, EdDSA, Ed25519 ou Ed448 |
-| `KEY_SIZE` | Taille RSA en bits, 4096 par défaut |
+| `KEY_SIZE` | Taille RSA en bits, 4096 par défaut, minimum 2048 |
 | `KEY_CURVE` | prime256v1 (défaut), secp384r1 ou secp521r1 |
 | `KEY_EDDSA` | Ed25519 (défaut) ou Ed448 pour EdDSA générique |
-| `DAYS` | Validité demandée, non plafonnée automatiquement à l’expiration de l’émetteur |
+| `DAYS` | Validité demandée ; refus si elle dépasse la validité restante de la chaîne |
 | `INT_DIR`, `KIND` | Répertoire explicite prioritaire sur le type, puis sur les valeurs de l’action |
 | `PROFILE`, `EXT_SECTION` | Profil installé explicite ; EXT_SECTION est prioritaire |
 | `SAN_DNS`, `SAN_IP`, `SAN_EMAIL`, `SAN_URI` | Listes typées séparées par des virgules |
@@ -131,7 +131,9 @@ clé d’un intermédiaire ; voir le [contrat d’émission](specifications/05-i
 Toute liste SAN explicite non vide supprime le SAN implicite issu du CN. Sans liste,
 les serveurs reçoivent DNS:CN ; les actions user/email reçoivent email:CN si le CN
 contient `@`. Les entrées incorrectes sont refusées, pas ignorées. Protéger les
-valeurs avec les guillemets appropriés dans le shell.
+valeurs avec les guillemets appropriés dans le shell. Un SAN de profil en conflit
+avec la demande est refusé avant signature ; les SAN émis sont comparés à la
+demande effective avant installation. Les champs du sujet utilisent un UTF-8 validé.
 
 Les fragments de `profiles/` composent les **nouvelles** configurations d’autorité.
 Leur modification ne met pas à jour un `openssl.cnf` existant : conserver et examiner
@@ -156,7 +158,8 @@ La recherche par CN exige une correspondance active exacte unique, ou une seule
 correspondance historique non ambiguë. Utiliser FILE en cas d’ambiguïté ; la
 révocation accepte aussi SERIAL. Une valeur CHAIN non vide est refusée. La
 vérification utilise la génération d’émetteur liée au certificat et la racine du
-workspace. Elle ne contrôle pas le nom d’hôte ou l’usage applicatif.
+workspace. Ajouter `VERIFY_DNS`, `VERIFY_IP` ou `VERIFY_EMAIL` pour une identité
+attendue, et `VERIFY_PURPOSE` pour l’usage applicatif.
 
 `VERIFY_CRL=1` exige les CRL valides de la racine **et** de l’émetteur, y compris
 la CRL historique appropriée. Une CRL requise absente, périmée ou invalide fait échouer
@@ -165,12 +168,30 @@ la commande.
 | VERIFY_MODE | Valide | Révoqué | Autre erreur de vérification terminée |
 | --- | --- | --- | --- |
 | normal | Succès | Échec | Échec |
+| strict | Succès | Échec | Échec |
 | tolerate_revoked | Succès | Succès | Échec |
 | info | Succès | Succès | Succès, rapport uniquement |
 
 Les erreurs préalables échouent dans tous les modes. En mode info, lire
 `VERIFY STATUS` : un code de sortie nul ne prouve pas la validité. Par défaut,
 la vérification ne contrôle pas la révocation.
+
+Pour les automatisations, `VERIFY_MODE=strict` exige une identité SAN attendue et
+un usage précis, impose les contrôles X.509 stricts et les CRL de toute la chaîne,
+et échoue pour toute erreur. `VERIFY_CRL=0` ne désactive pas ces contrôles stricts.
+Exemples, après renouvellement des CRL nécessaires :
+
+```sh
+make crl KIND=web CRL_HISTORY=1
+make verify KIND=web CN=app.example.test VERIFY_MODE=strict \
+  VERIFY_DNS=app.example.test VERIFY_PURPOSE=sslserver
+make verify KIND=smime CN=user@example.test \
+  VERIFY_EMAIL=user@example.test VERIFY_PURPOSE=smimesign
+```
+
+Les usages sont ceux d’OpenSSL : sslserver, sslclient, smimesign, smimeencrypt,
+timestampsign, etc. Un usage propre à une version (comme codesign) échoue si le
+backend choisi ne le prend pas en charge.
 
 ```sh
 make crl-root
@@ -194,7 +215,14 @@ La levée de suspension (`removeFromCRL`) n’est pas prise en charge.
 
 `crl-root` utilise la durée configurée, normalement sept jours ; CRL_DAYS contrôle
 la génération intermédiaire. `crl-all` inclut les répertoires legacy correspondants
-et exclut la racine. Aucune URL de CRL n’est téléchargée ou ajoutée automatiquement
+et exclut la racine par défaut. `make crl-all CRL_HISTORY=1 CRL_DAYS=7` renouvelle
+explicitement les CRL de la racine, des intermédiaires courants et des générations
+conservées, y compris dans les répertoires legacy. `make crl KIND=web CRL_HISTORY=1`
+limite la recherche à cet intermédiaire et renouvelle également la racine.
+Les chemins personnalisés doivent être sélectionnés explicitement. Toute la liste
+est contrôlée avant émission, mais les installations sont individuelles : un échec
+tardif peut laisser des CRL déjà renouvelées et des compteurs avancés.
+Aucune URL de CRL n’est téléchargée ou ajoutée automatiquement
 aux extensions. `verify-intermediate-revoked` échoue pour un intermédiaire révoqué ;
 il n’inverse pas le succès de vérification. Les commandes `show-intermediate-serial`
 et `crl-root-revoked` permettent l’inspection avec un sélecteur d’autorité explicite.
@@ -250,6 +278,13 @@ Utiliser `pki-data/` ou une exclusion Git locale explicite pour les données
 personnalisées. Les configurations contiennent des chemins absolus : déplacer un
 workspace exige leur rattachement après examen.
 
+Une autorité existante dont la base ou les compteurs manquent est refusée sans
+recréation d’état. Restaurer et réconcilier explicitement les fichiers conservés ;
+ne jamais réinitialiser les compteurs. La génération et la réutilisation de RSA
+exigent au moins 2048 bits ; la vérification de chaîne impose le niveau de sécurité
+2 d’OpenSSL. Les anciennes clés ou certificats trop faibles demandent une migration
+explicite : ces contrôles ne remplacent ni ne révoquent les données existantes.
+
 Les transactions partagent `.locks/root-ca.lock`. Une émission ou un déplacement
 interrompu peut laisser `.recovery/pending`, qui bloque les opérations sous verrou
 jusqu’à examen :
@@ -271,7 +306,7 @@ les limites de persistance, les verrous abandonnés et les procédures manuelles
 make help
 make tree
 make ls-web
-make test-stage0 test-stage1 test-stage2 test-stage3 test-stage4 test-stage5 test-stage6
+make test-stage0 test-stage1 test-stage2 test-stage3 test-stage4 test-stage5 test-stage6 test-stage7 test-stage8
 make test-smoke
 ```
 
@@ -281,10 +316,22 @@ concurrence, révocation et pannes injectées ; la publication utilise des simul
 locales. Voir [test/README.md](test/README.md) pour l’exécution et les
 [critères d’acceptation](specifications/10-acceptance-and-traceability.md) pour les limites.
 
-`make clean` supprime `root`, les chemins correspondant à `intm-*` et `out` sans
-confirmation, clés et historiques compris. Ce n’est ni un simple nettoyage de cache
-ni une procédure de reprise ; cela ne réinitialise pas les autorités placées dans
-des chemins personnalisés arbitraires ni les journaux de reprise.
+`make clean` affiche désormais un aperçu sans modifier le workspace. Après examen
+des chemins et sauvegarde si nécessaire, `make clean CLEAN_APPLY=1` supprime root,
+les autorités intm-* reconnues à la racine du workspace et out, clés et historiques
+compris. Le plan complet est revérifié sous verrou. Les candidats symboliques et
+les autorités reconnues incomplètes sont refusés ; les répertoires intm-* sans
+configuration sont conservés. Les chemins personnalisés et journaux de reprise
+restent hors périmètre. CLEAN_APPLY=1 avec DRY_RUN=1 est refusé.
+Le nettoyage valide l’état local des autorités sans interpréter les chemins ni
+les politiques OpenSSL : un ancien chemin après déplacement ne le bloque pas.
+
+Compatibilité : l’émission refuse désormais un émetteur invalide ou une durée DAYS
+supérieure à la validité restante de la chaîne. Le message indique l’expiration
+limitante et le maximum en jours entiers. Exemple :
+`make archive CN="Records Seal" DAYS=3600` si l’émetteur le permet ; une autorité de
+3650 jours ne peut pas émettre plus tard une feuille de 3650 jours. Aucune durée
+n’est plafonnée silencieusement ; les certificats existants ne sont pas migrés.
 
 ## Documentation
 

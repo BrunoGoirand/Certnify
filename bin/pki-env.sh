@@ -148,7 +148,7 @@ canonicalize_path_allow_missing() {
 # ---- OpenSSL presence + version (refuse LibreSSL) ----
 require_openssl(){
   command -v "$OPENSSL" >/dev/null 2>&1 || die "openssl not found in PATH"
-  local vstr; vstr="$($OPENSSL version)"
+  local vstr; vstr="$("$OPENSSL" version)"
   grep -q 'LibreSSL' <<<"$vstr" && die "LibreSSL non supporté"
   grep -Eq 'OpenSSL (1\.1\.1[a-z]*|3\.[0-9]+\.[0-9]+)' <<<"$vstr" \
     || die "OpenSSL 1.1.1 ou 3.x requis, trouvé: $vstr"
@@ -351,6 +351,8 @@ validate_component_utf8() {
   if ! no_double_space "$v"; then
     die "$label contains consecutive spaces (forbidden): '$v'"
   fi
+  command -v iconv >/dev/null 2>&1 || die "iconv is required for UTF-8 subject validation"
+  printf '%s' "$v" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 || die "$label is not valid UTF-8"
   validate_len "$label" "$v" "$maxlen"
   printf '%s' "$v"
 }
@@ -376,7 +378,6 @@ rfc2253_escape_value() {
   s="${s//</\\<}"
   s="${s//>/\\>}"
   s="${s//;/\\;}"
-  s="${s//=/\\=}"
 
   if [[ "$s" == \#* ]]; then
     s="\\$s"
@@ -391,7 +392,7 @@ rfc2253_escape_value() {
   printf '%s' "$s"
 }
 
-# RFC2253-order DN builder to match `openssl -nameopt RFC2253`
+# RFC2253-order DN builder to match `openssl -nameopt RFC2253,utf8,-esc_msb`
 canonical_dn_rfc2253() {
   local parts=()
   [[ -n "${CN:-}"  ]] && parts+=("CN=$(rfc2253_escape_value "$CN")")
@@ -427,6 +428,7 @@ gen_private_key() {
   local rsa_bits="${2-}"
   local ec_curve="${3-}"
   local destination="$4"
+  check_key_generation_policy "$alg" "$rsa_bits" "$ec_curve"
   local out; out="$(mktemp "$(dirname "$destination")/.key.XXXXXX")"
   local quiet="${QUIET_OPENSSL:-0}"
 
@@ -483,6 +485,7 @@ gen_private_key() {
       ;;
   esac
 
+  assert_private_key_policy "$out"
   chmod 400 "$out"
   mv -f "$out" "$destination"
 }
@@ -567,14 +570,9 @@ pki_records() {
 # the CA lock. Unsupported (>64-bit) values fail rather than truncate or wrap.
 ensure_serial_monotonic() {
   local dir="$1" current next tmp
-  [[ -f "$dir/index.txt" ]] || die "Missing index: $dir/index.txt"
-  if [[ -f "$dir/serial" ]]; then
-    current="$(cat "$dir/serial")"
-  else
-    current="1000"
-  fi
-  next="$(PKI_RECORD_COUNTER="$current" pki_records serial "$dir/index.txt")" || return 1
-  if [[ ! -f "$dir/serial" || "$next" != "$current" ]]; then
+  check_next_serial "$dir"
+  current="$(cat "$dir/serial")"; next="$PKI_NEXT_SERIAL"
+  if [[ "$next" != "$current" ]]; then
     tmp="$(mktemp "$dir/serial.tmp.XXXXXX")"
     printf '%s\n' "$next" > "$tmp"
     mv "$tmp" "$dir/serial"
@@ -647,7 +645,7 @@ write_ca_meta() {
   local _tmp; _tmp="$(mktemp "$(dirname "$OUT_FILE")/.meta.XXXXXX")"
   {
     echo "CREATED_AT=$(date -u +%FT%TZ)"
-    echo "OPENSSL_VERSION=$($OPENSSL version)"
+    echo "OPENSSL_VERSION=$("$OPENSSL" version)"
     echo "DN=$dn_rfc2253"
     echo "ISSUER_DN=$issuer_dn_rfc2253"
     echo "ALG=$alg_raw"
@@ -696,21 +694,11 @@ dedup_csv() {
 #  Layouts & OpenSSL config templates
 # ============================================
 ensure_root_layout() {
-  local base="$1"
-  check_authority_paths "$base"
-  mkdir -p "$base"/{certs,crl,newcerts,private}
-  [[ -f "$base/index.txt" ]] || : > "$base/index.txt"
-  [[ -f "$base/serial"    ]] || echo 1000 > "$base/serial"
-  [[ -f "$base/crlnumber" ]] || echo 1000 > "$base/crlnumber"
+  initialize_authority_layout "$1" root
 }
 
 ensure_intermediate_layout() {
-  local base="$1"
-  check_authority_paths "$base"
-  mkdir -p "$base"/{certs,crl,csr,newcerts,private}
-  [[ -f "$base/index.txt" ]] || : > "$base/index.txt"
-  [[ -f "$base/serial"    ]] || echo 1000 > "$base/serial"
-  [[ -f "$base/crlnumber" ]] || echo 1000 > "$base/crlnumber"
+  initialize_authority_layout "$1" intermediate
 }
 
 _build_root_cnf() {
@@ -868,3 +856,7 @@ source "$ROOT_DIR/bin/pki-crl.sh"
 source "$ROOT_DIR/bin/pki-policy.sh"
 
 source "$ROOT_DIR/bin/pki-recovery.sh"
+source "$ROOT_DIR/bin/pki-validity.sh"
+
+source "$ROOT_DIR/bin/pki-input.sh"
+validate_public_inputs

@@ -1,4 +1,28 @@
 # Effective cryptographic policy and safe artifact identities (MIT).
+check_key_generation_policy() {
+  local alg bits="$2" curve="$3"
+  alg="$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')"
+  case "$alg" in
+    RSA)
+      validate_integer KEY_SIZE "$bits"
+      (( 10#$bits >= 2048 )) || die "RSA keys must have at least 2048 bits (requested/effective: $bits)"
+      ;;
+    EC)
+      case "$curve" in prime256v1|secp384r1|secp521r1) ;; *) die "Unsupported EC curve: $curve" ;; esac
+      ;;
+    ED25519|ED448) ;;
+    EDDSA)
+      case "${KEY_EDDSA:-Ed25519}" in Ed25519|ed25519|Ed448|ed448) ;; *) die "Unsupported EdDSA variant" ;; esac
+      ;;
+    *) die "Unsupported KEY_ALG: $alg" ;;
+  esac
+}
+
+assert_private_key_policy() {
+  inspect_private_key_metadata "$1"
+  check_key_generation_policy "$DETECTED_KEY_ALG" "$DETECTED_KEY_SIZE" "$DETECTED_KEY_CURVE"
+}
+
 normalize_key_request() {
   KEY_ALG="$(printf '%s' "${KEY_ALG:-RSA}" | tr '[:lower:]' '[:upper:]')"
   case "$KEY_ALG" in
@@ -41,7 +65,7 @@ validate_policy_config() {
     required="$required v3_intermediate_ca server_cert server_ec client_cert client_ec code_sign smime smime_sign smime_encrypt archive archive_seal timestamping"
   fi
   PKI_REQUIRED="$required" LC_ALL=C awk '
-    /^[ \t]*\[/ {s=$0; gsub(/[ \t\[\]]/,"",s); seen[s]++; next}
+    /^[ \t]*\[/ {s=$0; gsub(/[ \t\[\]]/,"",s); seen[s]++; if(s~/^certnify_(request_san|request_names|san_check)$/) bad=1; next}
     /^[ \t]*[#;]/ {next}
     /=/ {key=$0; sub(/=.*/,"",key); gsub(/[ \t]/,"",key); val=$0; sub(/^[^=]*=[ \t]*/,"",val); if((s SUBSEP key) in values && values[s SUBSEP key]!=val) bad=1; values[s SUBSEP key]=val; count[s]++}
     END {
@@ -68,6 +92,7 @@ validate_policy_config() {
 create_root_openssl_cnf_if_missing() (
   cnf="$1"; base="$2"
   if [[ -f "$cnf" ]]; then check_config "$base" "$cnf"; exit; fi
+  [[ ! -s "$base/certs/ca.cert.pem" && ! -s "$base/private/ca.key.pem" ]] || die "Missing authority policy: $cnf; restore and review explicitly"
   stage="$(mktemp "$(dirname "$cnf")/.policy.XXXXXX")"
   trap 'rm -f "$stage" "$stage.bak"' EXIT
   _build_root_cnf "$stage" "$2" "$3" "${4:-}"
@@ -79,6 +104,7 @@ create_root_openssl_cnf_if_missing() (
 create_intermediate_openssl_cnf_if_missing() (
   cnf="$1"; base="$2"
   if [[ -f "$cnf" ]]; then check_config "$base" "$cnf"; exit; fi
+  [[ ! -s "$base/certs/ca.cert.pem" && ! -s "$base/private/ca.key.pem" ]] || die "Missing authority policy: $cnf; restore and review explicitly"
   stage="$(mktemp "$(dirname "$cnf")/.policy.XXXXXX")"
   trap 'rm -f "$stage"' EXIT
   _build_intermediate_cnf "$stage" "$2" "$3"
@@ -166,3 +192,49 @@ claim_leaf_name() {
   printf '%s\n' "$CN" > "$mapping"
   chmod 444 "$mapping"
 }
+
+# Use the backend's decoded SANs so equivalent IP spellings compare identically.
+san_names() {
+  local mode="$1" file="$2"
+  if [[ "$mode" == certificate ]]; then
+    LC_ALL=C "$OPENSSL" x509 -in "$file" -noout -ext subjectAltName
+  else
+    LC_ALL=C "$OPENSSL" req -in "$file" -noout -text
+  fi | LC_ALL=C awk -f "$ROOT_DIR/bin/pki-san-output.awk" | LC_ALL=C sort -u
+}
+
+# Compile request/profile SANs before any CA mutation, using a disposable key.
+# These are CSRs only: no CA key is used and no certificate is issued.
+expected_leaf_sans() (
+  set -e
+  stage="$(mktemp -d)" || exit 1
+  trap 'rm -rf "$stage"' EXIT
+  "$OPENSSL" genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out "$stage/key.pem" >/dev/null 2>&1 || exit 1
+  request_args=(-new -utf8 -config "$REQ_CNF_DN" -key "$stage/key.pem" -out "$stage/request.pem")
+  [[ -z "$SAN_DNS$SAN_IP$SAN_EMAIL$SAN_URI" ]] || request_args+=(-reqexts certnify_request_san)
+  "$OPENSSL" req "${request_args[@]}" >/dev/null || exit 1
+  requested="$(san_names request "$stage/request.pem")" || exit 1
+  definition="$(PKI_SECTION="$EXT_SECTION" awk '
+    /^[ \t]*\[/ {s=$0; gsub(/[ \t\[\]]/,"",s)}
+    s==ENVIRON["PKI_SECTION"] && /^[ \t]*subjectAltName[ \t]*=/ {value=$0}
+    END {print value}
+  ' "$INT_CNF")"
+  if [[ -n "$definition" ]]; then
+    cat "$REQ_CNF_DN" > "$stage/profile.cnf" || exit 1
+    printf '\n[ certnify_san_check ]\n%s\n' "$definition" >> "$stage/profile.cnf" || exit 1
+    "$OPENSSL" req -new -utf8 -config "$stage/profile.cnf" -key "$stage/key.pem" -reqexts certnify_san_check -out "$stage/profile.pem" >/dev/null || exit 1
+    configured="$(san_names request "$stage/profile.pem")" || exit 1
+    [[ -z "$requested" || "$requested" == "$configured" ]] || die "Profile $EXT_SECTION SAN conflicts with requested SANs; no certificate issued"
+    printf '%s' "$configured"
+  else
+    if [[ -n "$requested" ]]; then
+      copying="$(awk '
+        /^[ \t]*\[/ {s=$0; gsub(/[ \t\[\]]/,"",s)}
+        s=="CA_default" && /^[ \t]*copy_extensions[ \t]*=/ {v=$0; sub(/^[^=]*=[ \t]*/,"",v); sub(/[ \t]+$/,"",v)}
+        END {print v}
+      ' "$INT_CNF")"
+      [[ "$copying" == copy ]] || die "Requested SANs require copy_extensions = copy"
+    fi
+    printf '%s' "$requested"
+  fi
+)

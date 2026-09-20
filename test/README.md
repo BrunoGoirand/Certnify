@@ -10,6 +10,8 @@ make test-stage3
 make test-stage4
 make test-stage5
 make test-stage6
+make test-stage7
+make test-stage8
 make test-smoke
 ```
 
@@ -68,3 +70,15 @@ Suite 6 injects issuance, installation, move and publication failures, including
 a killed issuer. See [the recovery contract](../specifications/08-architecture-and-reliability.md).
 Publication uses only disposable local copy stubs. Recovery acknowledgment in these
 tests records fixture-specific manual inspection; it is not an automatic repair.
+
+Suite 7 covers audit A01–A06: missing state without mutation, orphan serials,
+literal Make parameters/stems, scalar validation, weak generated/reused keys,
+weak imported certificates, profile/request SAN conflicts and post-sign mismatch,
+UTF-8 validation/identity/idempotence, and direct intermediate defaults.
+
+Suite 8 covers routine-operation hardening: nonmutating cleanup previews and
+bounded explicit deletion, duration/expired-issuer refusals before state changes,
+UTC conversion across leap years and 2038, DNS/IP/email/purpose checks and strict
+CRL verification, CN-only user batch behavior, and historical CRL renewal through
+in-place rekey and directory rollover. The smoke archive CA explicitly has a
+longer lifetime than its leaves, as required by the new duration admission rule.

@@ -37,10 +37,12 @@ Publication commands are privileged operator code; exit zero is not independentl
 verified remote delivery. Repeated publication must be safe for the chosen command.
 Read-only permissions do not establish immutability or tamper evidence.
 
-The CLI does not uniformly type-check every input. DN/SAN validation is the bounded
-subset in chapter 04, not full Unicode normalization, complete mailbox/URI syntax
-or proof of domain ownership. Issued validity is not capped to issuer expiry.
-Verification supplies no hostname/application-purpose check. CRL endpoints are not
+Shared scalar controls are type-checked before mutation; configuration fragments
+remain trusted operator input. DN/SAN validation is the bounded subset in chapter
+04, not Unicode normalization, complete mailbox/URI syntax
+or proof of domain ownership. Excessive requested validity is refused against the full chain; it is not silently capped.
+Explicit identity/application-purpose checks and a strict verification mode are
+available; default verification remains chain-only. CRL endpoints are not
 automatically embedded or fetched. Additional services outside scope are listed
 in chapter 01.
 

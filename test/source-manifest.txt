@@ -75,3 +75,12 @@ specifications/guides/recovery-en.md
 specifications/guides/recovery-fr.md
 specifications/guides/shell-en.md
 specifications/guides/shell-fr.md
+
+test/stage7.py
+bin/pki-input.sh
+bin/pki-san-output.awk
+bin/pki-validity.sh
+bin/pki-time.awk
+bin/pki-clean.sh
+bin/pki-crl-history.sh
+test/stage8.py

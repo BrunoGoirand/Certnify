@@ -65,8 +65,10 @@ built-in issuance destination, not only its preflight checks.
 The four-column inventory remains the format in chapter 03. All rows are validated
 before running a child command. Built-in issuance passes values as environment
 data to the corresponding leaf wrapper; inventory text is never evaluated as
-shell code. Web adds DNS:CN, auth/user/smime add email:CN, and code/archive add no
-batch SAN. Existing wrapper policy and configured options still apply. Default
+shell code. Web adds DNS:CN; auth/user/smime add email:CN only when the CN
+contains @, and otherwise leave the batch SAN empty. Code/archive add no batch
+SAN. Email-like values still pass normal SAN validation; arbitrary person names
+are no longer forced into email SAN syntax. Existing wrapper policy and configured options still apply. Default
 lifetimes are 397, 825, 730, 730, and 3650 days, respectively.
 
 **This is legacy CN-only reissuance, not a complete certificate migration.** It
