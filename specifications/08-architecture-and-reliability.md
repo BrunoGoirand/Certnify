@@ -91,8 +91,10 @@ Keys are generated to a same-directory temporary file and renamed only after
 successful generation. A failed intermediate rekey leaves the old canonical
 key/certificate/chain/metadata intact until signing and verification of the
 replacement succeed. Old pairs are archived together in a staged generation
-directory. Leaf forced replacement retains a uniquely named key backup and no
-longer replaces the previous canonical key before signing succeeds. Certificate, binding, policy
+directory. Leaf forced replacement backs up any existing key and stages its key
+and CSR. A complete serial-named key/CSR/certificate/fullchain set is retained.
+Only after chain verification does it enter the canonical-replacement phase and
+replace all four conventional paths, checking the resulting key/certificate pair. Certificate, binding, policy
 record, metadata and chain replacement use staged single-file renames; latest
 aliases are created under a temporary sibling directory and renamed individually.
 

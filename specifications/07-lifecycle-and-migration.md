@@ -69,7 +69,7 @@ shell code. Web adds DNS:CN; auth/user/smime add email:CN only when the CN
 contains @, and otherwise leave the batch SAN empty. Code/archive add no batch
 SAN. Email-like values still pass normal SAN validation; arbitrary person names
 are no longer forced into email SAN syntax. Existing wrapper policy and configured options still apply. Default
-lifetimes are 397, 825, 730, 730, and 3650 days, respectively.
+lifetimes are 397, 825, 730, 730, and 3600 days, respectively.
 
 **This is legacy CN-only reissuance, not a complete certificate migration.** It
 does not recover original subjects, all SANs, extensions, key policy, or expiry
@@ -178,9 +178,15 @@ INT_DIR=intm-web-ca FINAL_CRL=crl/ca-<version>.crl.pem \
 ```
 
 Reuse the original OUT_DIR if customized. FINAL_CRL must be a versioned PEM in
-that directory and pass current issuer, signature and time validation. It bypasses
+that directory and pass current issuer, signature and time validation. Its local
+`.resume-state` must match the PEM hash, revoked index rows and next CRL counter
+(chapter 03). Check this before any alias change or publication. Any intervening
+revocation or CRL counter advancement, including after a failed generation,
+requires a fresh final CRL. Missing state, including for older releases or an
+interruption before state installation, also requires fresh generation. It bypasses
 the remaining-leaf issuance guard because it republishes existing bytes. All
 six remote artifacts are attempted again; publication commands must tolerate
-repeated copies. Alias resume deliberately selects that CRL as latest. Expired
+repeated copies. An admitted retry may select that same CRL as latest; it cannot
+roll back to an earlier issuer state. Expired
 CRLs cannot be resumed: generate a fresh CRL under normal policy. Remote updates
 are neither atomic nor rolled back. No real remote destination is used in tests.

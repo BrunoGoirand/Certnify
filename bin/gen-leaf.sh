@@ -46,7 +46,7 @@
 #    user   → EXT_SECTION=client_cert, DAYS=825
 #    dev    → EXT_SECTION=code_sign,   DAYS=730
 #    email  → EXT_SECTION=smime,       DAYS=730
-#    doc    → EXT_SECTION=archive,     DAYS=3650
+#    doc    → EXT_SECTION=archive,     DAYS=3600
 #
 #  ── Intermediate Selection ────────────────────────────────────
 #  INT_DIR="intm-web-ca"         # Full or relative path to intermediate
@@ -143,7 +143,7 @@ if [[ -n "$ACTION" ]]; then
       ;;
     doc)
       : "${EXT_SECTION:=archive}"
-      : "${DAYS:=3650}"
+      : "${DAYS:=3600}"
       ;;
     *)
       die "Action inconnue: '$ACTION' (attendu: server|user|dev|email|doc)"
@@ -458,15 +458,19 @@ recovery_start "leaf authority=$INT_DIR CN=$CN"
 recovery_note "key=$KEY_PATH csr=$CSR_PATH certificate=$CRT_PATH"
 claim_leaf_name
 # Si FORCE_NEW_KEY=1 et une clé existe, on la sauvegarde puis on régénère.
-if [[ -s "$KEY_PATH" && "${FORCE_NEW_KEY:-0}" == "1" ]]; then
-  ts="$(date +%Y%m%d%H%M%S 2>/dev/null || date +%s)"
-  bak="${KEY_PATH%.key.pem}.key.${ts}.$$.bak.pem"
-  authority_path "$INT_DIR" "$ROOT_DIR/$bak" >/dev/null
-  info "FORCE_NEW_KEY=1 → previous key backup to: $bak"
-  staged_install "$KEY_PATH" "$bak" 600
+if [[ "${FORCE_NEW_KEY:-0}" == "1" ]]; then
+  if [[ -s "$KEY_PATH" ]]; then
+    ts="$(date +%Y%m%d%H%M%S 2>/dev/null || date +%s)"
+    bak="${KEY_PATH%.key.pem}.key.${ts}.$$.bak.pem"
+    authority_path "$INT_DIR" "$ROOT_DIR/$bak" >/dev/null
+    info "FORCE_NEW_KEY=1 → previous key backup to: $bak"
+    staged_install "$KEY_PATH" "$bak" 600
+    recovery_note "old_key=$KEY_PATH backup=$bak"
+  fi
   CANON_LEAF_KEY="$KEY_PATH"
   KEY_PATH="$(mktemp "$INT_DIR/private/.replacement.XXXXXX")"
-  recovery_note "old_key=$CANON_LEAF_KEY backup=$bak staged_key=$KEY_PATH"
+  CSR_PATH="$(mktemp "$INT_DIR/csr/.replacement.XXXXXX")"
+  recovery_note "canonical_key=$CANON_LEAF_KEY staged_key=$KEY_PATH staged_csr=$CSR_PATH"
 
 fi
 
@@ -567,7 +571,7 @@ staged_install "$policy_tmp" "$policy_record"
 rm -f "$policy_tmp"
 
 # ---- If destination exists, suffix with the serial to avoid overwrite ----
-if [[ -e "$CRT_PATH" && -n "$SERIAL_HEX_ACTUAL" ]]; then
+if [[ ( -e "$CRT_PATH" || -n "$CANON_LEAF_KEY" ) && -n "$SERIAL_HEX_ACTUAL" ]]; then
   CRT_PATH="$INT_DIR/certs/srl-${SERIAL_HEX_ACTUAL}-${ARTIFACT_STEM}.cert.pem"
 fi
 
@@ -576,9 +580,18 @@ authority_path "$INT_DIR" "$ROOT_DIR/$CRT_PATH" >/dev/null
 [[ ! -e "$CRT_PATH" && ! -L "$CRT_PATH" ]] || die "Certificate destination already exists: $CRT_PATH"
 check_pair "$TMPCRT" "$KEY_PATH"
 if [[ -n "$CANON_LEAF_KEY" ]]; then
-  staged_install "$KEY_PATH" "$CANON_LEAF_KEY" 600
+  NEW_KEY="$INT_DIR/private/srl-${SERIAL_HEX_ACTUAL}-${ARTIFACT_STEM}.key.pem"
+  NEW_CSR="$INT_DIR/csr/srl-${SERIAL_HEX_ACTUAL}-${ARTIFACT_STEM}.csr.pem"
+  for output in "$NEW_KEY" "$NEW_CSR"; do
+    authority_path "$INT_DIR" "$ROOT_DIR/$output" >/dev/null
+    [[ ! -e "$output" && ! -L "$output" ]] || die "Replacement destination already exists: $output"
+  done
+  staged_install "$KEY_PATH" "$NEW_KEY" 600
+  staged_install "$CSR_PATH" "$NEW_CSR"
   rm -f "$KEY_PATH"
-  KEY_PATH="$CANON_LEAF_KEY"
+  rm -f "$CSR_PATH"
+  KEY_PATH="$NEW_KEY"
+  CSR_PATH="$NEW_CSR"
 fi
 staged_install "$TMPCRT" "$CRT_PATH"
 rm -f "$TMPCRT"
@@ -639,4 +652,15 @@ if [[ -s "$CRT_PATH" ]]; then
   fi
 fi
 
+if [[ -n "$CANON_LEAF_KEY" ]]; then
+  # Keep a complete serial-named set, then replace the conventional deployment
+  # paths only after validation. The journal covers interruption between renames.
+  recovery_phase canonical-replacement
+  staged_install "$KEY_PATH" "$CANON_LEAF_KEY" 600
+  staged_install "$CSR_PATH" "$INT_DIR/csr/${ARTIFACT_STEM}.csr.pem"
+  staged_install "$CRT_PATH" "$INT_DIR/certs/${ARTIFACT_STEM}.cert.pem"
+  staged_install "$CHAIN_PATH" "$INT_DIR/certs/${ARTIFACT_STEM}.fullchain.cert.pem"
+  check_pair "$INT_DIR/certs/${ARTIFACT_STEM}.cert.pem" "$CANON_LEAF_KEY"
+  info "Canonical leaf key, certificate and chain replaced: ${ARTIFACT_STEM}"
+fi
 recovery_complete

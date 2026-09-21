@@ -15,9 +15,9 @@ dependency. See [test/README.md](../test/README.md) for execution and packaging.
 | make test-stage3 | 8 | Actual command adapters, batch outcomes/receipts, FILE/CHAIN |
 | make test-stage4 | 9 | Trust/CRL errors, idempotent revocation, read-only plans, failed refresh |
 | make test-stage5 | 8 | Effective key/profile matrix, SANs, names, configuration completeness |
-| make test-stage6 | 11 | Interrupted commits, killed issuer, preserved replacements, publication resume |
+| make test-stage6 | 15 | Interrupted commits, killed issuer, preserved replacements, publication resume |
 | make test-stage7 | 13 | Audit A01–A06, state loss, Make transport, key strength, SAN equality and UTF-8 |
-| make test-stage8 | 11 | Controlled cleanup, chain lifetime admission, identity/purpose/strict verification, CN-only batch and historical CRLs |
+| make test-stage8 | 13 | Controlled cleanup, chain lifetime admission, identity/purpose/strict verification, CN-only batch and historical CRLs |
 | make test-smoke | Integration workflow | Kinds, profiles, SANs, issuance, revocation, rekey and CLI examples |
 
 The stage-numbered command names are stable test-suite identifiers, not an active
@@ -40,7 +40,7 @@ This records test scope, not a guarantee for untested systems or every failure p
 | A09 | Required | RSA, each supported EC curve, Ed25519, Ed448: generated key parses and matching certificate verifies for supported backend/signing combinations |
 | A10 | Required | Typed and legacy SAN input: trimming, deduplication, per-type ordering, URI colons, server/email defaults, and resulting decoded SAN contents |
 | A11 | Required | Active duplicate CN fails before leaf key replacement; ALLOW_DUPLICATE_CN bypasses; revoked/expired records do not block valid renewal |
-| A12 | Required | FORCE_NEW_KEY=0 reuses key; =1 retains backup and replaces key; rotate retains canonical artifacts and uses srl-serial-stem artifacts |
+| A12 | Required | FORCE_NEW_KEY=0 reuses key; =1 backs up an existing key, retains serial-named artifacts and replaces matching canonical key/CSR/certificate/fullchain; rotate retains canonical artifacts and uses srl-serial-stem artifacts |
 | A13 | Required | Leaf fullchain has leaf+intermediate only; CA chain has intermediate+root; file permissions match storage contract |
 | A14 | Required | Disabled or revoked intermediate blocks issuance unless explicitly overridden; intermediate replacement removes disabled marker |
 | A15 | Required | Verification modes implement OK/REVOKED/ERROR exit table; precondition errors still fail in info mode |
@@ -129,4 +129,27 @@ The routine-operation suite additionally checks cleanup preview/application,
 issuer-chain lifetime admission before mutation, explicit application identity
 and purpose, strict full-chain CRLs, person-name batch reissuance, and CRL renewal
 across retained keys and directory rollovers. Its snapshots concern disposable
-fixtures only. See AUDIT.md section 8 for current execution results.
+fixtures only. The targeted correction results below are separate from full-suite qualification.
+
+## Four-defect correction validation (2026-09-21)
+
+Ten targeted scenarios passed on the local macOS/OpenSSL 3.6.4 environment:
+
+- Stage 6 (seven): `test_resume_refuses_new_revocations_and_newer_crls`,
+  `test_refresh_preserves_final_archives_and_updates_both_formats`,
+  `test_leaf_rekey_failure_preserves_old_pair`,
+  `test_digest_encodings_backend_and_publication_retry`,
+  `test_failed_der_and_alias_preserve_latest_and_resume`,
+  `test_resume_requires_unchanged_record_and_refresh_failure_preserves_aliases`,
+  `test_forced_first_key_has_matching_canonical_and_serial_artifacts`.
+- Stage 8 (three): `test_archive_defaults_fit_issuer_and_explicit_duration_is_not_capped`,
+  `test_chain_duration_limit_before_mutation`,
+  `test_historical_crls_cover_old_and_active_leafs`.
+
+These cover stale CRL rejection without publication or state changes, archive
+preservation and current PEM/DER consistency, coherent canonical and serial-named
+leaf replacement, publication/conversion failure recovery, and 3600-day archive
+defaults through both Make aliases, direct issuance and batch issuance. Explicit
+excessive validity still fails before authority mutation. Bash syntax and
+`git diff --check` passed. The complete suites and smoke were not rerun; actual
+remote publication, power loss and other platforms remain unqualified.

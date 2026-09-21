@@ -23,6 +23,10 @@ if [[ -n "${FINAL_CRL:-}" ]]; then
   CRL_PEM="$(authority_path "$INT_DIR" "$FINAL_CRL")"
   [[ "$(dirname "$CRL_PEM")" == "$output_dir" && "$(basename "$CRL_PEM")" == ca-*.crl.pem && ! -L "$CRL_PEM" ]] || die "FINAL_CRL must select a versioned PEM in OUT_DIR"
   validate_crl "$CRL_PEM" "$INT_CRT" || die "Cannot resume an invalid/stale final CRL"
+  resume_state="$(authority_path "$INT_DIR" "$CRL_PEM.resume-state")"
+  [[ -f "$resume_state" && ! -L "$CRL_PEM.resume-state" ]] || die "Missing safe CRL resume state; generate a fresh final CRL"
+  [[ "$(cat "$resume_state")" == "$(crl_resume_state "$INT_DIR" "$CRL_PEM")" ]] \
+    || die "CRL resume state changed (revocations, CRL counter or artifact); generate a fresh final CRL"
 else
   duration="${CRL_HOURS:-$CRL_DAYS}"
   [[ "$duration" =~ ^[0-9]+$ && "$duration" =~ [1-9] ]] || die "CRL duration must be a positive integer"
@@ -30,7 +34,7 @@ else
   [[ ! -e "$CRL_PEM" && ! -L "$CRL_PEM" ]] || die "Versioned output exists: $CRL_PEM"
 fi
 CRL_DER="${CRL_PEM%.pem}"; LATEST_PEM="$output_dir/ca.crl.pem"; LATEST_DER="$output_dir/ca.crl"
-for output in "$CRL_PEM" "$CRL_DER" "$CRL_PEM.sha256" "$CRL_DER.sha256" "$CRL_PEM.publication" "$LATEST_PEM" "$LATEST_DER"; do
+for output in "$CRL_PEM" "$CRL_DER" "$CRL_PEM.sha256" "$CRL_DER.sha256" "$CRL_PEM.resume-state" "$CRL_PEM.publication" "$LATEST_PEM" "$LATEST_DER"; do
   authority_path "$INT_DIR" "$output" >/dev/null
   [[ ! -d "$output" ]] || die "Output is a directory: $output"
 done
@@ -59,6 +63,10 @@ local_committed=1
 info "Local CRL committed: $CRL_PEM"
 staging="$(mktemp -d "$output_dir/.final.XXXXXX")"
 trap 'rc=$?; rm -rf "${staging:-}"; pki_exit "$rc"' EXIT
+if [[ -z "${FINAL_CRL:-}" ]]; then
+  crl_resume_state "$INT_DIR" "$CRL_PEM" > "$staging/resume-state"
+  staged_install "$staging/resume-state" "$CRL_PEM.resume-state"
+fi
 "$OPENSSL" crl -in "$CRL_PEM" -outform DER -out "$staging/crl.der"
 # Both sidecars hash exactly the DER bytes. Preserve the intended legacy encodings:
 # PEM sidecar = uppercase hex; DER sidecar = base64; one LF, no labels/spaces.

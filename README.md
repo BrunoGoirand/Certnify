@@ -1,4 +1,4 @@
-<a href="https://certnify.org/"><img alt="Certnify logo" src="image/Certnify.png" width="300"></a>
+<a href="https://certnify.org/"><img alt="Certnify logo" src="image/Certnify.png" width="400"></a>
 
 # Certnify
 
@@ -78,7 +78,7 @@ required intermediate before issuing leaves. Shortcuts are `int-web`, `int-auth`
 | `user` | `intm-auth-ca` | 825 | RSA: `client_cert`; EC/EdDSA: `client_ec` |
 | `dev`, `code` | `intm-code-ca` | 730 | `code_sign` |
 | `email` | `intm-smime-ca` | 730 | `smime` (combined signing/encryption) |
-| `doc`, `archive` | `intm-archive-ca` | 3650 | `archive` |
+| `doc`, `archive` | `intm-archive-ca` | 3600 | `archive` |
 
 Examples below are independent issuance choices, requiring their corresponding authorities:
 
@@ -114,6 +114,12 @@ Explicit incompatible key/profile combinations fail.
 | `FORCE_NEW_KEY` | 0: reuse leaf key; 1: back up/replace; rotate: preserve canonical artifacts |
 | `ROOT_PATHLEN` | 1 by default; explicitly empty omits the constraint in a new config |
 | `QUIET_OPENSSL` | 1 suppresses selected backend chatter; toolkit logs remain |
+
+`FORCE_NEW_KEY=1` retains a serial-named key/CSR/certificate/fullchain set and,
+after verification, replaces all four conventional paths with matching artifacts.
+An existing key is backed up; interruptions still require journal review.
+Archive leaves default to 3600 days, leaving a margin below a newly created
+3650-day intermediate. Explicit DAYS values are never silently reduced.
 
 Reused keys keep their actual algorithm despite a different requested KEY_ALG.
 Key rotation does not bypass duplicate-CN protection: `ALLOW_DUPLICATE_CN=1` is a
@@ -238,7 +244,12 @@ Without DRY_RUN it generates PEM, DER and digest sidecars, plus latest aliases.
 By default it refuses unrevoked, unexpired indexed leaves. “Final” is advisory;
 it does not retire the authority. Remote publication occurs only with an explicitly
 configured PUBLISH_CMD. All six artifacts must succeed. FINAL_CRL selects a retained
-valid versioned PEM to retry without consuming another CRL number. See the
+valid versioned PEM to retry without consuming another CRL number. Its local
+`.resume-state` must match the PEM, revoked index entries and next CRL counter.
+A subsequent revocation or CRL generation attempt invalidates that retry; generate
+a fresh final CRL. Older final CRLs without this state must also be regenerated.
+Routine refresh replaces latest aliases without changing versioned archives;
+if a current DER exists, it is refreshed alongside the PEM. See the
 [publication and recovery guide](specifications/guides/recovery-en.md).
 
 ## Storage and interrupted operations

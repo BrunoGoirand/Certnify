@@ -121,6 +121,23 @@ class Operations(unittest.TestCase):
         self.assertIn('maximum DAYS=', result.stderr)
         self.assertEqual(before, self.state())
 
+    def test_archive_defaults_fit_issuer_and_explicit_duration_is_not_capped(self):
+        self.make('int-archive', 'CN=Archive CA')
+        for target in ['archive', 'doc']:
+            self.make(target, 'CN=' + target)
+        self.run_cmd(['bash', 'bin/gen-leaf.sh'], ACTION='doc', CN='direct-archive')
+        (self.work / 'archives.tsv').write_text('1000\t2030-01-01T00:00:00Z\tbatch-archive\tunknown\n')
+        self.make('reissue-leafs-archive', 'INPUT=archives.tsv')
+        ca = self.work / 'intm-archive-ca'
+        for name in ['archive', 'doc', 'direct-archive', 'batch-archive']:
+            dates = self.run_cmd([self.backend, 'x509', '-in', str(ca / ('certs/' + name + '.cert.pem')),
+                                  '-noout', '-startdate', '-enddate']).stdout.splitlines()
+            times = [datetime.datetime.strptime(line.split('=', 1)[1], '%b %d %H:%M:%S %Y GMT') for line in dates]
+            self.assertEqual((times[1] - times[0]).days, 3600)
+        before = snapshot(ca)
+        self.make('archive', 'CN=too-long', 'DAYS=3650', success=False)
+        self.assertEqual(before, snapshot(ca))
+
     def test_expired_issuer_refused_before_signing(self):
         cert = self.ca / 'certs/ca.cert.pem'
         cert.chmod(0o600)

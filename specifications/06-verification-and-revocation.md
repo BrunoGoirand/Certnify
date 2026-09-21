@@ -73,7 +73,11 @@ prevents installation. Successful output receives mode 0444 and replaces the
 installed path by rename. Existing CRLs remain intact on generation/validation
 failure, and temporary output is removed on normal failure and handled signals.
 An existing internal latest symlink is replaced, rather than overwriting its
-historical target. A directory is not a valid CRL destination.
+historical target. If the current ca.crl DER companion exists, generate its new
+bytes before installing either format and replace its directory entry as well.
+Archived PEM/DER/digests remain unchanged. A conversion failure preserves both
+current outputs, although the CRL counter may advance. The two final renames are
+not atomic as a pair. A directory is not a valid CRL destination.
 
 `AUTO_UPDATEDB=1` failure and requested pre-issuance CRL-refresh failure abort leaf
 issuance explicitly. They no longer install an empty CRL or continue silently.

@@ -43,6 +43,17 @@ validate_crl() {
   '; then warn "Expired, future, or invalid CRL validity: $file"; return 1; fi
 }
 
+# Bind publication retries to the immutable PEM and the issuer's revocation state.
+# A later CRL attempt (even a failed one) requires a fresh publication, never rollback.
+crl_resume_state() {
+  local base="$1" pem="$2" digest revoked counter
+  digest="$("$OPENSSL" dgst -sha256 "$pem" | awk '{print $NF}')" || return 1
+  revoked="$(LC_ALL=C awk -F '\t' '$1=="R" {print $1 "\t" $2 "\t" $3 "\t" $4}' "$base/index.txt" |
+    "$OPENSSL" dgst -sha256 | awk '{print $NF}')" || return 1
+  counter="$(cat "$base/crlnumber")" || return 1
+  printf 'SCHEMA=1\nPEM_SHA256=%s\nREVOKED_SHA256=%s\nNEXT_CRL_NUMBER=%s\n' "$digest" "$revoked" "$counter"
+}
+
 # Subshell owns only temporary output, never the caller's transaction lock.
 # OpenSSL may consume a CRL number even on failure; do not roll it back.
 publish_crl() (
@@ -57,7 +68,8 @@ publish_crl() (
   [[ ! -d "$output" ]] || die "CRL destination is a directory: $output"
   check_pair "$cert" "$key" || exit 1
   tmp="$(mktemp "$(dirname "$output")/.crl.XXXXXX")" || exit 1
-  trap 'rm -f "$tmp"' EXIT
+  tmp_der=""
+  trap 'rm -f "$tmp"; [[ -z "$tmp_der" ]] || rm -f "$tmp_der"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
   if ! "$OPENSSL" ca -batch -config "$base/openssl.cnf" -cert "$cert" -keyfile "$key" -gencrl "$@" -out "$tmp"; then
@@ -67,5 +79,16 @@ publish_crl() (
     warn "Generated CRL rejected; previous output preserved: $output"; exit 1
   fi
   chmod 444 "$tmp" || exit 1
+  # Final publication may have installed latest PEM/DER aliases. Refresh their
+  # directory entries, never the versioned targets, and keep both formats current.
+  current_der="${output%.pem}"
+  if [[ "${output##*/}" == ca.crl.pem && ( -e "$current_der" || -L "$current_der" ) ]]; then
+    authority_path "$base" "$current_der" >/dev/null || exit 1
+    [[ ! -d "$current_der" ]] || die "CRL DER destination is a directory: $current_der"
+    tmp_der="$(mktemp "$(dirname "$output")/.crl-der.XXXXXX")" || exit 1
+    "$OPENSSL" crl -in "$tmp" -outform DER -out "$tmp_der" || exit 1
+    chmod 444 "$tmp_der" || exit 1
+  fi
   mv -f "$tmp" "$output" || exit 1
+  [[ -z "$tmp_der" ]] || mv -f "$tmp_der" "$current_der" || exit 1
 )

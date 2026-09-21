@@ -90,7 +90,9 @@ certificate has no embedded CN; reuse remains an operator-supplied association.
 
 A later certificate for an occupied stem uses `srl-<serial>-<stem>`. Forced rotate
 uses a temporary rot- namespace and ends with that same serial namespace. Existing
-serial destinations are not overwritten. Key/CSR/certificate suffix conventions
+serial destinations are not overwritten. FORCE_NEW_KEY=1 also retains a complete
+serial-named key/CSR/certificate/fullchain set, then replaces the conventional
+paths after verification; an existing private key is backed up. Key/CSR/certificate suffix conventions
 otherwise remain unchanged. No existing artifact is renamed just by lookup.
 
 Verification by CN now uses exact index selection (one active match, otherwise
@@ -279,3 +281,15 @@ Both configurations define `[ca] default_ca=CA_default` and a CA_default section
 Request settings use default_bits=4096, string_mask=utf8only, default_md=sha256, prompt=no, and a request DN section with replaceable C/O/OU/CN placeholders. x509_extensions points to v3_ca for the root and v3_intermediate_ca for intermediates. The policy sections require CN and permit optional country/state/locality/organization/organizational unit. The current DN injection drops empty C/O/OU lines; it does not expose state/locality inputs.
 
 The root composer appends root/base.cnf and substitutes its root basic-constraints placeholder. The intermediate composer appends its CA fragment, server RSA/EC, client RSA/EC, code signing, S/MIME legacy/sign/encrypt, archive legacy/seal, and timestamping fragments, adding the aliases specified in document 04. A fully imported configuration can contain custom sections; PROFILE/EXT_SECTION selects a section by name and the backend ultimately validates it.
+
+## Final CRL resume state
+
+Each newly generated final PEM has a local `<version>.crl.pem.resume-state` file,
+installed with mode 0444. It contains LF-terminated `SCHEMA=1`, `PEM_SHA256`,
+`REVOKED_SHA256` and `NEXT_CRL_NUMBER` fields. The first digest hashes the PEM
+bytes; the second hashes index R rows, in index order, with only tab-separated
+status, expiry, revocation data and serial fields followed by LF. The counter is
+read after generation. This local retry guard is distinct from the public DER
+hash sidecars and is not among the six remotely published artifacts. It is not
+tamper-proof against an administrator with write access. Missing or mismatched
+state requires fresh CRL generation; never reconstruct it to authorize an old CRL.

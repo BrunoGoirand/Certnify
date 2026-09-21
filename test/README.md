@@ -82,3 +82,13 @@ UTC conversion across leap years and 2038, DNS/IP/email/purpose checks and stric
 CRL verification, CN-only user batch behavior, and historical CRL renewal through
 in-place rekey and directory rollover. The smoke archive CA explicitly has a
 longer lifetime than its leaves, as required by the new duration admission rule.
+
+## Four-defect regression coverage (2026-09-21)
+
+Suite 6 now includes stale CRL replay refusal, missing resume state, immutable
+versioned CRL artifacts during refresh, current PEM/DER consistency, and coherent
+forced leaf replacement (including first issuance). Suite 8 checks 3600-day archive
+defaults through Make, direct and batch issuance while retaining explicit validity
+limits. Seven selected stage-6 scenarios and three selected stage-8 scenarios
+passed; this is not a full-suite or smoke rerun. Exact executed scenario names are
+recorded in the [acceptance map](../specifications/10-acceptance-and-traceability.md).

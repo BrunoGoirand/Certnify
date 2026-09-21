@@ -32,6 +32,6 @@ esac
 # Une seule chose à dire: ACTION=doc – gen-leaf fait tout le reste.
 # PROFILE reste accepté pour compat, mais gen-leaf consomme EXT_SECTION.
 env ACTION="doc" CN="${CN}" \
-  SAN="${SAN:-}" DAYS="${DAYS:-3650}" \
+  SAN="${SAN:-}" DAYS="${DAYS:-3600}" \
   PROFILE="${PROFILE:-$default_profile}" EXT_SECTION="${EXT_SECTION:-${PROFILE:-$default_profile}}" \
   "${SCRIPT_DIR}/gen-leaf.sh"

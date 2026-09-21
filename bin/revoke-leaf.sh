@@ -134,7 +134,8 @@ if [[ "$ISSUER_ID" != "$(certificate_id "$ROOT_DIR/$CA_DIR/certs/ca.cert.pem")" 
   CRL_TARGET="$ROOT_DIR/$CA_DIR/generations/$ISSUER_ID/ca.crl.pem"
 fi
 
-CRL_TARGET="$(authority_path "$CA_DIR" "$CRL_TARGET")"
+# Validate containment without replacing the destination by its symlink target.
+authority_path "$CA_DIR" "$CRL_TARGET" >/dev/null
 
 if [[ "$DRY_RUN" == 1 ]]; then
   info "PLAN serial=$SERIAL_HEX current=$before_status revoke=$([[ "$before_status" == R ]] && echo no || echo yes) crl_refresh=$CRL_UPDATE issuer=$ISSUER_ID"

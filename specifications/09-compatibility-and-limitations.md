@@ -21,7 +21,7 @@ change only with explicit import/export behavior; filenames are not identities.
 | Ambiguous CN | Report candidates; require explicit supported SERIAL/FILE selection |
 | Explicit SAN list | Suppress implicit CN SAN; reject unsupported syntax rather than drop it |
 | Failed issuance or directory move | Preserve pending evidence and require manual review before mutation retry |
-| Failed CRL publication | Preserve committed local CRL; resume with FINAL_CRL and per-artifact outcomes |
+| Failed CRL publication | Preserve committed local CRL; resume with FINAL_CRL only with matching local resume state; otherwise generate a fresh CRL; retain per-artifact outcomes |
 | Four-column reissuance | Declare CN-only loss; never imply preservation of original SAN/profile/subject/key policy |
 
 ## Deliberate exclusions

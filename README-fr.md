@@ -84,7 +84,7 @@ Les raccourcis sont `int-web`, `int-auth`, `int-code`, `int-smime` et `int-archi
 | `user` | `intm-auth-ca` | 825 | RSA : `client_cert` ; EC/EdDSA : `client_ec` |
 | `dev`, `code` | `intm-code-ca` | 730 | `code_sign` |
 | `email` | `intm-smime-ca` | 730 | `smime` (signature et chiffrement combinés) |
-| `doc`, `archive` | `intm-archive-ca` | 3650 | `archive` |
+| `doc`, `archive` | `intm-archive-ca` | 3600 | `archive` |
 
 Ces exemples sont des choix d’émission indépendants ; chacun exige son autorité :
 
@@ -121,6 +121,13 @@ de clé et de profil incompatibles sont refusées.
 | `FORCE_NEW_KEY` | 0 : réutiliser ; 1 : sauvegarder/remplacer ; rotate : conserver les fichiers canoniques |
 | `ROOT_PATHLEN` | 1 par défaut ; une valeur explicitement vide omet la contrainte dans une nouvelle configuration |
 | `QUIET_OPENSSL` | 1 masque certaines sorties du moteur ; les messages de l’outil restent visibles |
+
+`FORCE_NEW_KEY=1` conserve un ensemble clé/CSR/certificat/chaîne suffixé par le
+numéro de série puis, après vérification, remplace les quatre chemins habituels
+par des fichiers concordants. Une clé existante est sauvegardée ; une interruption
+nécessite toujours l’examen du journal. Les feuilles d’archive durent 3600 jours
+par défaut, avec une marge sous les 3650 jours d’un nouvel intermédiaire.
+Une valeur DAYS explicite n’est jamais réduite silencieusement.
 
 Une clé réutilisée conserve son algorithme réel malgré un autre KEY_ALG demandé.
 La rotation de clé ne contourne pas la protection contre les doublons de CN :
@@ -259,7 +266,12 @@ Par défaut, il refuse les certificats indexés non révoqués et non expirés. 
 reste indicatif : l’autorité n’est pas retirée du service. La publication distante
 exige un PUBLISH_CMD explicitement configuré. Les six artefacts doivent réussir.
 FINAL_CRL sélectionne un PEM versionné valide conservé pour retenter sans consommer
-un autre numéro de CRL. Voir le [guide de publication et reprise](specifications/guides/recovery-fr.md).
+un autre numéro de CRL. Son fichier local `.resume-state` doit correspondre au
+PEM, aux entrées révoquées et au prochain compteur de CRL. Une révocation ou une
+tentative ultérieure de génération de CRL rend cette reprise impossible : générer
+une nouvelle CRL finale. Les anciennes CRL sans cet état doivent aussi être
+régénérées. Le rafraîchissement courant remplace les alias sans modifier leurs
+archives ; si un DER courant existe, il est actualisé avec le PEM. Voir le [guide de publication et reprise](specifications/guides/recovery-fr.md).
 
 ## Stockage et interruptions
 

@@ -25,7 +25,8 @@ generate_crl() {
     [[ "$ISSUER_ID" =~ ^[0-9a-f]{64}$ ]] || die "Invalid ISSUER_ID"
     cert="$(authority_path "$base" "generations/$ISSUER_ID/ca.cert.pem")"
     key="$(authority_path "$base" "generations/$ISSUER_ID/ca.key.pem")"
-    output="$(authority_path "$base" "generations/$ISSUER_ID/ca.crl.pem")"
+    output="$ROOT_DIR/$base/generations/$ISSUER_ID/ca.crl.pem"
+    authority_path "$base" "$output" >/dev/null
     [[ "$(certificate_id "$cert")" == "$ISSUER_ID" ]] || die "Generation fingerprint mismatch"
   fi
   if [[ "$operation" == root ]]; then

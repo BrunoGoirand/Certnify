@@ -159,7 +159,7 @@ case "$KIND" in
   auth|user) ISSUE_SCRIPT=bin/gen-user.sh; DEFAULT_DAYS=825 ;;
   smime) ISSUE_SCRIPT=bin/gen-email.sh; DEFAULT_DAYS=730 ;;
   code) ISSUE_SCRIPT=bin/gen-code.sh; DEFAULT_DAYS=730 ;;
-  archive|archives) ISSUE_SCRIPT=bin/gen-archive.sh; DEFAULT_DAYS=3650 ;;
+  archive|archives) ISSUE_SCRIPT=bin/gen-archive.sh; DEFAULT_DAYS=3600 ;;
   *) [[ -n "${ISSUE_CMD:-}" ]] || die "Unknown KIND: $KIND" ;;
 esac
 case "${ISSUE_CMD:-}" in

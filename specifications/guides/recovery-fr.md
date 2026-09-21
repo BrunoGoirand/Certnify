@@ -48,3 +48,13 @@ Aucun nouveau numéro de CRL n’est consommé. Les six artefacts sont retentés
 commande doit accepter les copies répétées. Examiner les reçus `.publication`.
 Une CRL expirée exige une nouvelle génération. « Finale » reste indicatif : cela
 n’interdit pas l’émission et ne met pas fin au service de révocation.
+
+La reprise exige aussi le fichier original `.crl.pem.resume-state` et des octets
+PEM, entrées révoquées et compteur de prochaine CRL inchangés. Une révocation
+ultérieure ou l’avancement du compteur, même après un échec de génération, bloque
+la reprise avant publication. Si cet état manque, notamment pour les CRL produites
+par une ancienne version, relancer la commande initiale **sans FINAL_CRL**, avec
+les mêmes OUT_DIR et PUBLISH_CMD, en respectant le contrôle des feuilles restantes.
+Ne pas abaisser le compteur ni fabriquer un état de reprise. Un rafraîchissement
+courant préserve les archives et remplace les alias PEM/DER ; leurs deux
+remplacements restent des renommages distincts.

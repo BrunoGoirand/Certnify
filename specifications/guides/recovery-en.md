@@ -54,3 +54,12 @@ This reuses the existing valid CRL without consuming another CRL number. All six
 artifacts are attempted again; the publisher must tolerate repeated copies.
 Review `.publication` receipts. An expired CRL needs fresh generation. A final
 CRL never freezes issuance or ends the operator's revocation-service responsibility.
+
+A retry additionally requires the original `.crl.pem.resume-state` and unchanged
+PEM bytes, revoked index entries and next CRL counter. Later revocations or CRL
+counter advancement (even from a failed generation) block replay before publication.
+Missing state, including final CRLs from older releases, requires fresh generation:
+repeat the original command **without FINAL_CRL**, retaining OUT_DIR and PUBLISH_CMD
+and satisfying the normal remaining-leaf guard. Do not reset counters or fabricate
+resume state. A routine CRL refresh preserves versioned archives and replaces
+current PEM/DER aliases; paired output updates remain separate renames.

@@ -20,6 +20,10 @@ at preflight and passed explicitly to OpenSSL, avoiding an overrun caused by
 key generation or signing delay. Date conversion is portable AWK, with Gregorian
 leap-year handling; no Python runtime or platform-specific date parsing is used.
 
+Archive leaves default to 3600 days in wrappers, direct ACTION=doc issuance and
+built-in batch reissuance; intermediates retain their 3650-day default. This margin
+does not guarantee admission under an older or shorter-lived issuer.
+
 This intentionally changes admission for existing workflows: a 3650-day leaf
 requested after creation of a 3650-day intermediate is too long. Select a smaller
 DAYS value or renew the issuer with appropriate validity. Even a repeated
@@ -94,8 +98,8 @@ Historical leaves retain their original cryptographic issuer binding.
    Unless ALLOW_DUPLICATE_CN=1, refuse exact CN matches that are V and unexpired,
    reporting their serials and locators. Key rotation does not bypass this rule.
 4. Start the pending journal and claim the name mapping. FORCE_NEW_KEY=0 reuses
-   an existing key. With 1, retain a uniquely named backup and stage the new key,
-   leaving the canonical key until signing succeeds. With rotate, prepare new
+   an existing key. With 1, back up any existing key and stage the new key and CSR,
+   retaining canonical artifacts until the replacement has passed verification. With rotate, prepare new
    rot- namespace artifacts without replacing the canonical artifacts.
 5. Inspect the actual key again, validate its profile, retain the exact policy
    snapshot and create the CSR from the preflighted UTF-8 DN/SAN configuration.
@@ -107,11 +111,14 @@ Historical leaves retain their original cryptographic issuer binding.
    mismatch leaves committed history and a pending journal, without installation.
    Persist issuer binding and policy reference. Select a free canonical or
    `srl-<serial>-<stem>` certificate destination; never overwrite an occupied serial
-   destination. Check the issued pair and install the forced replacement key,
-   when applicable, then the certificate.
+   destination. Check the issued pair. With FORCE_NEW_KEY=1, install the new
+   key, CSR and certificate under the serial namespace, including on first issuance.
 8. For rotate, rename key/CSR/certificate into the serial namespace. Build the
-   leaf+intermediate fullchain, verify against the workspace root and complete
-   the journal. No failed post-check undoes the issuance database commit.
+   leaf+intermediate fullchain and verify against the workspace root. With
+   FORCE_NEW_KEY=1, then copy the serial-named key, CSR, certificate and fullchain
+   to their conventional paths, check the canonical pair and complete the journal.
+   Individual replacements are not a multi-file transaction; interruption leaves
+   recovery pending. No failed post-check undoes the issuance database commit.
 
 ## Results for another implementation
 

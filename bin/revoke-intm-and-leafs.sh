@@ -222,7 +222,8 @@ if [[ "$CRL_UPDATE" == 1 ]]; then
       [[ -f "$historical_cert" ]] || continue
       historical_cert="$(authority_path "$DIR" "$historical_cert")"
       historical_key="${historical_cert%/ca.cert.pem}/ca.key.pem"
-      historical_out="$(authority_path "$DIR" "${historical_cert%/ca.cert.pem}/ca.crl.pem")"
+      historical_out="${historical_cert%/ca.cert.pem}/ca.crl.pem"
+      authority_path "$DIR" "$historical_out" >/dev/null
       publish_crl "$DIR" "$historical_cert" "$historical_key" "$historical_out" -crldays "$CRL_DAYS" \
         || die "Revocations remain committed; historical CRL refresh failed"
     done

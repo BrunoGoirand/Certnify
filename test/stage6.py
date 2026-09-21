@@ -99,8 +99,15 @@ class Recovery(unittest.TestCase):
         self.acknowledge()
         self.make('server', 'CN=rekey.example', 'ALLOW_DUPLICATE_CN=1', 'FORCE_NEW_KEY=1')
         self.assertNotEqual(old_key, (self.ca / 'private/rekey.example.key.pem').read_bytes())
-        self.assertEqual(old_cert, (self.ca / 'certs/rekey.example.cert.pem').read_bytes())
-        self.assertTrue((self.ca / 'certs/srl-1001-rekey.example.cert.pem').exists())
+        self.assertNotEqual(old_cert, (self.ca / 'certs/rekey.example.cert.pem').read_bytes())
+        for directory, suffix in [('private', 'key.pem'), ('csr', 'csr.pem'),
+                                  ('certs', 'cert.pem'), ('certs', 'fullchain.cert.pem')]:
+            self.assertEqual((self.ca / directory / ('rekey.example.' + suffix)).read_bytes(),
+                             (self.ca / directory / ('srl-1001-rekey.example.' + suffix)).read_bytes())
+        key = self.run_cmd([self.backend, 'pkey', '-in', str(self.ca / 'private/rekey.example.key.pem'), '-pubout']).stdout
+        cert = self.run_cmd([self.backend, 'x509', '-in', str(self.ca / 'certs/rekey.example.cert.pem'), '-noout', '-pubkey']).stdout
+        self.assertEqual(key, cert)
+        self.assertEqual(old_cert, (self.ca / 'newcerts/1000.pem').read_bytes())
 
     def test_rekey_failure_preserves_old_pair_and_metadata(self):
         old = {name: (self.ca / name).read_bytes() for name in
@@ -249,6 +256,77 @@ class Recovery(unittest.TestCase):
         self.final(FINAL_CRL=str(pem))
         self.assertEqual(counter, (self.ca / 'crlnumber').read_bytes())
         self.assertEqual(pem.name, os.readlink(self.ca / 'crl/ca.crl.pem'))
+
+    def test_resume_refuses_new_revocations_and_newer_crls(self):
+        self.make('server', 'CN=revoked.example')
+        self.final(ALLOW_REMAINING_LEAFS='1')
+        old = next((self.ca / 'crl').glob('ca-*.crl.pem'))
+        self.make('revoke', 'KIND=web', 'CN=revoked.example', 'CRL_UPDATE=0')
+        before = snapshot(self.work)
+        result = self.final(success=False, FINAL_CRL=str(old))
+        self.assertIn('CRL resume state changed', result.stderr)
+        self.assertEqual(before, snapshot(self.work))
+        self.final()
+        newer = next(p for p in (self.ca / 'crl').glob('ca-*.crl.pem') if p != old)
+        self.make('crl-root')
+        before = snapshot(self.work)
+        self.final(success=False, FINAL_CRL=str(old), PUBLISH_CMD='touch must-not-publish')
+        self.assertEqual(before, snapshot(self.work))
+        result = self.make('verify', 'KIND=web', 'CN=revoked.example', 'VERIFY_CRL=1', success=False)
+        self.assertIn('VERIFY STATUS: REVOKED', result.stdout)
+        # A later CRL, even with identical revoked entries, prevents rollback.
+        self.final()
+        before = snapshot(self.work)
+        self.final(success=False, FINAL_CRL=str(newer))
+        self.assertEqual(before, snapshot(self.work))
+
+    def test_resume_requires_unchanged_record_and_refresh_failure_preserves_aliases(self):
+        self.final()
+        archive = next((self.ca / 'crl').glob('ca-*.crl.pem'))
+        state = Path(str(archive) + '.resume-state')
+        saved = state.read_bytes()
+        state.unlink()
+        before = snapshot(self.work)
+        self.final(success=False, FINAL_CRL=str(archive))
+        self.assertEqual(before, snapshot(self.work))
+        state.write_bytes(saved)
+        wrapper = self.wrapper('if [[ "$1" == crl && " $* " == *" -outform DER "* ]]; then exit 77; fi')
+        before = snapshot(self.ca / 'crl')
+        self.make('crl', 'KIND=web', success=False, OPENSSL=wrapper)
+        self.assertEqual(before, snapshot(self.ca / 'crl'))
+        # Failed generation may consume a counter: conservative retry requires a new CRL.
+        self.final(success=False, FINAL_CRL=str(archive))
+        self.final()
+
+    def test_forced_first_key_has_matching_canonical_and_serial_artifacts(self):
+        self.make('server', 'CN=first.example', 'FORCE_NEW_KEY=1')
+        for directory, suffix in [('private', 'key.pem'), ('csr', 'csr.pem'),
+                                  ('certs', 'cert.pem'), ('certs', 'fullchain.cert.pem')]:
+            self.assertEqual((self.ca / directory / ('first.example.' + suffix)).read_bytes(),
+                             (self.ca / directory / ('srl-1000-first.example.' + suffix)).read_bytes())
+        self.make('verify', 'KIND=web', 'CN=first.example')
+
+    def test_refresh_preserves_final_archives_and_updates_both_formats(self):
+        self.make('server', 'CN=refresh.example')
+        self.final(ALLOW_REMAINING_LEAFS='1')
+        archive = next((self.ca / 'crl').glob('ca-*.crl.pem'))
+        files = [archive, archive.with_suffix(''), Path(str(archive) + '.sha256'),
+                 Path(str(archive.with_suffix('')) + '.sha256'), Path(str(archive) + '.resume-state')]
+        old = {p: p.read_bytes() for p in files}
+        self.make('revoke', 'KIND=web', 'CN=refresh.example')
+        for p, data in old.items(): self.assertEqual(data, p.read_bytes(), str(p))
+        for command in [None, ('crl', 'KIND=web'), ('crl-all', 'CRL_HISTORY=1')]:
+            if command: self.make(*command)
+            for p, data in old.items(): self.assertEqual(data, p.read_bytes(), str(p))
+            pem = self.ca / 'crl/ca.crl.pem'
+            der = self.ca / 'crl/ca.crl'
+            self.assertFalse(pem.is_symlink())
+            self.assertFalse(der.is_symlink())
+            decoded = subprocess.check_output([self.backend, 'crl', '-in', str(pem), '-outform', 'DER'])
+            self.assertEqual(decoded, der.read_bytes())
+        self.make('crl-root')
+        result = self.make('verify', 'KIND=web', 'CN=refresh.example', 'VERIFY_CRL=1', success=False)
+        self.assertIn('VERIFY STATUS: REVOKED', result.stdout)
 
 
 if __name__ == '__main__':

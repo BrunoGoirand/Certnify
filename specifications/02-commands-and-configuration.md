@@ -44,7 +44,7 @@ Run Make from the project root. The default target is `help`. Variables are stri
 | user | auth | 825 | RSA: `client_cert`; EC/EdDSA: `client_ec` | Auth Issuing CA |
 | dev | code | 730 | `code_sign` | Code Signing Issuing CA |
 | email | smime | 730 | `smime` | S/MIME Issuing CA |
-| doc | archive | 3650 | `archive` | Archive Issuing CA |
+| doc | archive | 3600 | `archive` | Archive Issuing CA |
 
 Root defaults: CN `Root CA`, 7300 days. Intermediate defaults: 3650 days. Direct `gen-intm.sh` defaults CN to `Example Intermediate CA` and, without a selector, directory to `intermediate`. Direct `gen-leaf.sh` defaults CN to `example.com`; without an action it uses 397 days and the effective-key server profile; an intermediate selector remains required.
 
@@ -142,7 +142,7 @@ the documented defaults, including the special empty ROOT_PATHLEN behavior.
 | `SAN` | Combined syntax; defaults apply only when no SAN list is supplied (chapter 04) |
 | `SMIME_MODE` | `combined`; `legacy` also selects smime; `sign` / `encrypt` select specialized profiles |
 | `ARCHIVE_MODE` | `legacy`; `seal`, `timestamp` / `timestamping` supported |
-| `FORCE_NEW_KEY` | `0`; `1` backs up/replaces a leaf key; `rotate` preserves canonical artifacts |
+| `FORCE_NEW_KEY` | `0`; `1` backs up an existing key, retains a serial-named set and replaces matching canonical key/CSR/certificate/fullchain; `rotate` preserves canonical artifacts |
 | `ALLOW_DUPLICATE_CN` | 0; `1` bypasses active-CN refusal |
 | `ALLOW_SIGN_WITH_REVOKED_INT` | 0; `1` bypasses both revoked-parent and disabled-marker checks |
 | `AUTO_UPDATEDB` | 1; refresh expiry statuses before duplicate check |

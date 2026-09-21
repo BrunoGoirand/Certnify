@@ -23,7 +23,7 @@
 #   make user    CN="john@example.com"  [SAN="email:john@example.com"] [DAYS=825]
 #   make dev     CN="CI Signing Key"    [DAYS=730]
 #   make email   CN="john@example.com"  [SAN="email:john@example.com"] [DAYS=730]
-#   make doc     CN="Records Seal"      [DAYS=3650]
+#   make doc     CN="Records Seal"      [DAYS=3600]
 #   Alias compat : make code / make archive
 #
 #   (Override possible à tout moment : KIND=… ou INT_DIR=…)
@@ -100,7 +100,7 @@ help:
 	@echo '  make user    CN="john@example.com"  [SAN="email:john@example.com"] [DAYS=825]'
 	@echo '  make dev     CN="CI Signing Key"    [DAYS=730]'
 	@echo '  make email   CN="john@example.com"  [SAN="email:john@example.com"] [DAYS=730]'
-	@echo '  make doc     CN="Records Seal"      [DAYS=3650]'
+	@echo '  make doc     CN="Records Seal"      [DAYS=3600]'
 	@echo '  aliases: make code / make archive'
 	@echo '  -- Vérification & Révocation:'
 	@echo '  make verify KIND=web FILE=".../cert.crt" [VERIFY_CRL=0|1] [VERIFY_MODE=normal|tolerate_revoked|info]'
