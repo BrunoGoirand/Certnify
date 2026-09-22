@@ -144,7 +144,7 @@ the documented defaults, including the special empty ROOT_PATHLEN behavior.
 | `KEY_CURVE` | prime256v1 | EC curve; also secp384r1 or secp521r1 |
 | `KEY_EDDSA` | Ed25519 | Variant when generic EdDSA is selected |
 | `DAYS` | operation-dependent | Requested certificate lifetime |
-| `ROOT_PATHLEN` | 1 | Root constraint; explicitly empty omits it |
+| `ROOT_PATHLEN` | 1 | Root constraint; explicitly empty omits it; 0 blocks intermediate and leaf issuance |
 | `ROOT_CNF` | root/openssl.cnf | Root generator configuration path only |
 | `OPENSSL` | openssl | Backend executable passed literally through the environment |
 | `CERTNIFY_PROFILES_DIR` | workspace/profiles | Fragment source directory |

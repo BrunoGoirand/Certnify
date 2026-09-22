@@ -160,10 +160,12 @@ fi''')
         self.assertFalse((self.work / '.recovery/power-loss').exists())
 
     def test_operational_paths_cannot_use_persistence_exclusions(self):
-        for path in ('.git/ca.cnf', '.locks/ca.cnf', 'profiles/root/base.cnf'):
+        for path in ('.git/ca.cnf', '.locks/ca.cnf', 'profiles/root/base.cnf',
+                     'bin/custom/ca.cnf', 'test/custom/ca.cnf',
+                     'profiles/custom/ca.cnf', 'specifications/custom/ca.cnf'):
             with self.subTest(path=path):
                 result = self.make('root', 'CN=Excluded State', 'ROOT_CNF=' + path, success=False)
-                self.assertTrue('Reserved non-PKI' in result.stderr or 'Distribution source' in result.stderr,
+                self.assertTrue('Reserved' in result.stderr or 'Distribution source' in result.stderr,
                                 result.stdout + result.stderr)
                 self.assertFalse((self.work / 'root/private/ca.key.pem').exists())
         self.assertFalse((self.work / '.git/ca.cnf').exists())

@@ -148,7 +148,7 @@ See [issuance categories](specifications/04-cryptography-and-profiles.md#authori
 | `SAN_DNS`, `SAN_IP`, `SAN_EMAIL`, `SAN_URI` | Comma-separated typed lists |
 | `SAN` | Combined list such as `DNS:app.example.test,IP:127.0.0.1` |
 | `FORCE_NEW_KEY` | 0: reuse leaf key; 1: back up/replace; rotate: preserve canonical artifacts |
-| `ROOT_PATHLEN` | 1 by default; explicitly empty omits the constraint in a new config |
+| `ROOT_PATHLEN` | 1 by default; explicitly empty omits the constraint in a new config; 0 prevents intermediate and leaf issuance |
 | `QUIET_OPENSSL` | 1 suppresses selected backend chatter; toolkit logs remain |
 
 `FORCE_NEW_KEY=1` retains a serial-named key/CSR/certificate/fullchain set and,
@@ -292,6 +292,12 @@ make list-leafs-web
 make reissue-leafs-web DRY_RUN=1
 make rollback-web
 ```
+
+Inventory exports accept `OUT=out/<name>.tsv` (directly under `out/`) or `OUT=-`
+for stdout. Other paths, symbolic links and hard links are refused. `out/` is
+reserved for exports and cannot contain an authority. Existing TSV exports are
+replaced atomically after complete validation.
+
 
 Rollover preserves the previous authority directory and creates a new active one;
 it does not revoke or migrate old certificates. Rollback preserves the current

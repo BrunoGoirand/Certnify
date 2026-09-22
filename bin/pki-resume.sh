@@ -17,7 +17,11 @@ recovery_relative() {
   case "$path" in "$ROOT_DIR"/*) path="${path#"$ROOT_DIR/"}" ;; *) die "Recovery path outside workspace" ;; esac
   ! has_control_chars "$path" || die "Control character in recovery path"
   case "/$path/" in */../*|*/./*|*//* ) die "Noncanonical recovery path: $path" ;; esac
-  case "$path" in .git|.git/*|.locks|.locks/*|.recovery|.recovery/*|bin|bin/*|test|test/*|profiles|profiles/*|specifications|specifications/*|*'$'*|*'"'*|*'#'*|*'\'*) die "Unsafe recovery destination: $path" ;; esac
+  if [[ "$kind" == L ]]; then
+    data_path "$path" entry >/dev/null
+  else
+    data_path "$path" >/dev/null
+  fi
   [[ "$path" == */* || "$kind" == L ]] || die "Recovery destination must belong to an authority: $path"
   parent="$(dirname "$ROOT_DIR/$path")"
   [[ -d "$parent" && "$(cd "$parent" && pwd -P)" == "$parent" ]] || die "Missing or aliased recovery parent: $parent"
@@ -110,7 +114,7 @@ recovery_resume() {
     if [[ "$kind" == L ]]; then
       expected="$(cat "$journal/files/$number")"
       [[ "$expected" == /* ]] || expected="$(dirname "$ROOT_DIR/$path")/$expected"
-      workspace_path "$expected" >/dev/null
+      data_path "$expected" >/dev/null
     fi
   done < "$journal/manifest"
   (( count > 0 )) || die "Empty recovery plan"

@@ -264,6 +264,13 @@ The export remains four columns without a header: serial, ISO UTC expiry, CN,
 and index certificate locator. It validates the complete index before replacing
 an output file. With OUT=-, stdout contains TSV only; diagnostic logs use stderr.
 Successful empty or explicit-directory listings return zero.
+File destinations must be `out/<name>.tsv`, directly inside the physical workspace
+`out/` directory (absolute spelling is also accepted). Nested paths, aliases,
+symlinks, hard-linked destinations and non-regular files are refused before any
+write fence or publication. `out/` is reserved: authority admission rejects this
+subtree, and export refuses pre-existing authority markers there. Existing exports
+are replaced using a mode-0600 temporary file in the same directory followed by
+rename, under the workspace lock and durable write fence. `OUT=-` is read-only.
 
 Batch import requires exactly four columns. COL_SERIAL, COL_EXPIRES, and COL_CN
 must be distinct positions from 1 through 4. The selected fields must contain a

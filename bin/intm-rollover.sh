@@ -25,6 +25,7 @@ if [[ -e "$BASE_DIR" ]]; then
   backfill_bindings "$BASE_DIR"
   tag="$(date +%Y%m%d%H%M%S)"; LEGACY_DIR="${BASE_DIR}-legacy-$tag"; n=0
   while [[ -e "$LEGACY_DIR" || -L "$LEGACY_DIR" ]]; do n=$((n+1)); LEGACY_DIR="${BASE_DIR}-legacy-$tag-$n"; done
+  check_authority_paths "$LEGACY_DIR"
   recovery_start "intm-rollover"
   recovery_note "$BASE_DIR" "$LEGACY_DIR"
   recovery_phase directory-move-outcome-uncertain

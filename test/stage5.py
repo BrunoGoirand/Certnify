@@ -36,6 +36,45 @@ class Policy(unittest.TestCase):
     def cert(self, relative):
         return self.run_cmd([self.env['OPENSSL'], 'x509', '-in', relative, '-noout', '-text']).stdout
 
+    def test_zero_root_pathlen_blocks_existing_hierarchy_without_mutation(self):
+        # Re-sign only the disposable root, preserving its subject/key so the
+        # existing intermediate still chains to it (legacy incompatible PKI).
+        config = self.work / 'zero-root.cnf'
+        config.write_text((self.work / 'root/openssl.cnf').read_text().replace('pathlen:1', 'pathlen:0'))
+        cert = self.work / 'root/certs/ca.cert.pem'
+        cert.chmod(0o600)
+        self.run_cmd([self.env['OPENSSL'], 'x509', '-in', str(cert),
+                      '-signkey', 'root/private/ca.key.pem', '-days', '7300',
+                      '-extfile', str(config), '-extensions', 'v3_ca',
+                      '-out', 'zero-root.pem'])
+        cert.write_bytes((self.work / 'zero-root.pem').read_bytes())
+        self.assertIn('pathlen:0', self.cert('root/certs/ca.cert.pem'))
+        for args in [('int-web', 'CN=Policy Web', 'FORCE_REISSUE=1'),
+                     ('int-auth', 'CN=Blocked CA'),
+                     ('rollover-web', 'INT_CN=Replacement'),
+                     ('server', 'CN=blocked.example')]:
+            with self.subTest(args=args):
+                before = snapshot(self.work)
+                result = self.make(*args, 'ROOT_PATHLEN=9', success=False)
+                self.assertIn('requires CA:TRUE and pathlen >= 1', result.stderr)
+                self.assertEqual(before, snapshot(self.work))
+
+    def test_fresh_root_pathlen_zero_and_unconstrained(self):
+        for limit in ['0', '']:
+            with self.subTest(pathlen=limit):
+                self.work = Path(self.temp.name) / ('fresh-' + (limit or 'unlimited'))
+                copy_sources(SOURCE, self.work)
+                result = self.make('root', 'CN=Standalone Root', 'ROOT_PATHLEN=' + limit)
+                if limit == '0':
+                    self.assertIn('cannot support Certnify intermediates', result.stderr)
+                    before = snapshot(self.work)
+                    result = self.make('int-web', 'CN=Blocked CA', success=False)
+                    self.assertIn('requires CA:TRUE and pathlen >= 1', result.stderr)
+                    self.assertEqual(before, snapshot(self.work))
+                else:
+                    self.make('int-web', 'CN=Unlimited Web')
+                    self.make('server', 'CN=unlimited.example')
+
     def test_effective_key_metadata_matrix(self):
         for alg, option, expected in [('RSA', 'KEY_SIZE=2048', 'RSA'), ('EC', 'KEY_CURVE=prime256v1', 'EC'),
                                       ('EC', 'KEY_CURVE=secp384r1', 'EC'), ('EC', 'KEY_CURVE=secp521r1', 'EC'),

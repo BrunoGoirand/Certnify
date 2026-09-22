@@ -156,7 +156,7 @@ une autorité spécialisée, même si le profil demandé lui serait compatible.
 | `SAN_DNS`, `SAN_IP`, `SAN_EMAIL`, `SAN_URI` | Listes typées séparées par des virgules |
 | `SAN` | Liste combinée, par exemple `DNS:app.example.test,IP:127.0.0.1` |
 | `FORCE_NEW_KEY` | 0 : réutiliser ; 1 : sauvegarder/remplacer ; rotate : conserver les fichiers canoniques |
-| `ROOT_PATHLEN` | 1 par défaut ; une valeur explicitement vide omet la contrainte dans une nouvelle configuration |
+| `ROOT_PATHLEN` | 1 par défaut ; une valeur explicitement vide omet la contrainte dans une nouvelle configuration ; 0 interdit l’émission d’intermédiaires et de feuilles |
 | `QUIET_OPENSSL` | 1 masque certaines sorties du moteur ; les messages de l’outil restent visibles |
 
 `FORCE_NEW_KEY=1` conserve un ensemble clé/CSR/certificat/chaîne suffixé par le
@@ -313,6 +313,12 @@ make list-leafs-web
 make reissue-leafs-web DRY_RUN=1
 make rollback-web
 ```
+
+Les exports acceptent `OUT=out/<nom>.tsv` (directement sous `out/`) ou `OUT=-`
+pour la sortie standard. Les autres chemins, liens symboliques et liens physiques
+sont refusés. `out/` est réservé aux exports et ne peut contenir une autorité.
+Un TSV existant est remplacé atomiquement après validation complète.
+
 
 Le rollover conserve le répertoire de l’autorité précédente et crée une nouvelle
 autorité active ; il ne révoque ni ne migre les anciens certificats. Le rollback

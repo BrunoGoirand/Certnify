@@ -18,6 +18,7 @@ if [[ -z "${KIND:-}" ]]; then KIND="$(basename "$LEGACY_DIR" | sed -n 's/^intm-\
 : "${KIND:?Cannot infer KIND}"
 ACTIVE_DIR="$(resolve_authority "intm-${KIND}-ca")"
 [[ "$ACTIVE_DIR" == "intm-${KIND}-ca" && "$LEGACY_DIR" != "$ACTIVE_DIR" && ! -L "$ACTIVE_DIR" ]] || die "Invalid rollback directory roles"
+check_authority_paths "$ACTIVE_DIR"
 check_config "$LEGACY_DIR"
 [[ "$(authority_issuance_kind "$LEGACY_DIR")" == "$KIND" ]] \
   || die "Rollback cannot change issuance category: $LEGACY_DIR -> $ACTIVE_DIR"
@@ -34,6 +35,7 @@ if [[ -e "$ACTIVE_DIR" ]]; then
   check_pair "$ACTIVE_DIR/certs/ca.cert.pem" "$ACTIVE_DIR/private/ca.key.pem"
   tag="$(date +%Y%m%d%H%M%S)"; backup="${ACTIVE_DIR}-pre-rollback-$tag"; n=0
   while [[ -e "$backup" || -L "$backup" ]]; do n=$((n+1)); backup="${ACTIVE_DIR}-pre-rollback-$tag-$n"; done
+  check_authority_paths "$backup"
   recovery_start "intm-rollback-to-legacy"
   recovery_note "$ACTIVE_DIR" "$backup"
   recovery_phase directory-move-outcome-uncertain

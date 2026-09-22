@@ -140,22 +140,94 @@ class Records(unittest.TestCase):
             self.assertEqual(generated.returncode, 0, generated.stdout + generated.stderr)
         (ca / 'index.txt').write_text(row(cn=r'Élodie \/ A,B', expiry='20500101000000Z'))
         r = subprocess.run(['bash', 'bin/list-leafs-by-issuer.sh'], cwd=workspace,
-                           env=dict(self.env, INT_DIR='intm-web-ca', OUT='batch.tsv'),
+                           env=dict(self.env, INT_DIR='intm-web-ca', OUT='out/batch.tsv'),
                            capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
-        exported = (workspace / 'batch.tsv').read_text()
+        exported = (workspace / 'out/batch.tsv').read_text()
         self.assertIn('Élodie / A,B', exported)
         r = subprocess.run(['bash', 'bin/intm-reissue-leafs.sh'], cwd=workspace,
-                           env=dict(self.env, KIND='web', INPUT='batch.tsv', DRY_RUN='1', REISSUE_MODE='cn-only'),
+                           env=dict(self.env, KIND='web', INPUT='out/batch.tsv', DRY_RUN='1', REISSUE_MODE='cn-only'),
                            capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn('Élodie / A,B', r.stdout)
+        destination = workspace / 'out/batch.tsv'
+        with destination.open() as previous:
+            old_inode = os.fstat(previous.fileno()).st_ino
+            r = subprocess.run(['bash', 'bin/list-leafs-by-issuer.sh'], cwd=workspace,
+                               env=dict(self.env, INT_DIR='intm-web-ca', OUT=str(destination.resolve())),
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertNotEqual(old_inode, destination.stat().st_ino)
+            self.assertEqual(previous.read(), exported)
+        self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(list(destination.parent.glob('.inventory.*')), [])
         (ca / 'index.txt').write_text(row() + 'invalid later row\n')
         r = subprocess.run(['bash', 'bin/list-leafs-by-issuer.sh'], cwd=workspace,
-                           env=dict(self.env, INT_DIR='intm-web-ca', OUT='batch.tsv'),
+                           env=dict(self.env, INT_DIR='intm-web-ca', OUT='out/batch.tsv'),
                            capture_output=True, text=True)
         self.assertNotEqual(r.returncode, 0)
-        self.assertEqual((workspace / 'batch.tsv').read_text(), exported)
+        self.assertEqual((workspace / 'out/batch.tsv').read_text(), exported)
+
+    def test_inventory_rejects_operational_paths_and_aliases_without_mutation(self):
+        workspace = (self.base / 'workspace').resolve()
+        copy_sources(SOURCE, workspace)
+        ca = workspace / 'custom' / 'issuer'
+        ca.mkdir(parents=True)
+        (ca / 'index.txt').write_text(row())
+        protected = ['root/private/ca.key.pem', 'custom/issuer/serial',
+                     'custom/issuer/crlnumber', 'custom/issuer/certs/ca.cert.pem',
+                     '.recovery/history/receipt', 'custom/issuer/index.txt']
+        for name in protected[:-1]:
+            target = workspace / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text('sentinel')
+        output = workspace / 'out'
+        output.mkdir()
+        (workspace / 'alias').symlink_to(ca, target_is_directory=True)
+        (output / 'key.tsv').symlink_to(workspace / protected[0])
+        (output / 'dangling.tsv').symlink_to(workspace / 'missing')
+        os.link(ca / 'serial', output / 'hard.tsv')
+        (output / 'directory.tsv').mkdir()
+        # Initialize the lock container; no PKI write fence should be created.
+        (workspace / '.locks').mkdir()
+        before = snapshot(workspace)
+        rejected = protected + ['alias/index.txt', 'out/key.tsv', 'out/dangling.tsv',
+                                'out/hard.tsv', 'out/directory.tsv', 'out/../root/serial',
+                                'out/sub/nested.tsv', 'batch.tsv', 'out/index.txt']
+        for name in rejected:
+            with self.subTest(destination=name):
+                result = subprocess.run(['bash', 'bin/list-leafs-by-issuer.sh'], cwd=workspace,
+                    env=dict(self.env, INT_DIR='custom/issuer', OUT=name),
+                    capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('Unsafe inventory destination', result.stderr)
+                self.assertEqual(before, snapshot(workspace))
+        # A symlink replacing the entire export directory must also be refused.
+        output.rename(workspace / 'saved-out')
+        output.symlink_to(ca, target_is_directory=True)
+        before = snapshot(workspace)
+        result = subprocess.run(['bash', 'bin/list-leafs-by-issuer.sh'], cwd=workspace,
+            env=dict(self.env, INT_DIR='custom/issuer', OUT='out/report.tsv'),
+            capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(before, snapshot(workspace))
+        output.unlink()
+        output.mkdir()
+        (output / 'index.txt').write_text('old authority')
+        before = snapshot(workspace)
+        result = subprocess.run(['bash', 'bin/list-leafs-by-issuer.sh'], cwd=workspace,
+            env=dict(self.env, INT_DIR='custom/issuer', OUT='out/report.tsv'),
+            capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(before, snapshot(workspace))
+        # New authorities cannot occupy any part of the export namespace.
+        for selector in ['out', 'out/new-ca']:
+            result = subprocess.run(['bash', '-c',
+                'source bin/pki-env.sh; check_authority_paths "$INT_DIR"'], cwd=workspace,
+                env=dict(self.env, INT_DIR=selector), capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0, result.stderr)
+            self.assertIn('Reserved inventory export directory', result.stderr)
+            self.assertEqual(before, snapshot(workspace))
 
     def test_real_duplicate_and_revoke_workflow(self):
         workspace = self.base / 'workspace'

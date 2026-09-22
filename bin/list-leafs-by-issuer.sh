@@ -7,7 +7,7 @@
 set -euo pipefail
 # shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
-pki_begin
+pki_begin read
 
 # ------------------------------------------------------------
 # Liste les leafs émis par un intermédiaire (depuis index.txt)
@@ -72,19 +72,29 @@ if [[ -z "${OUT:-}" ]]; then
   fi
 fi
 
-[[ "$OUT" == "-" ]] || OUT="$(workspace_path "$OUT")"
+# Admit the destination before starting a durable write transaction. The flat
+# namespace cannot contain authorities, recovery journals, or path aliases.
+if [[ "$OUT" != "-" ]]; then
+  OUT="$(inventory_output_path "$OUT")"
+fi
 
 # Validate the entire selection before publishing or replacing an inventory.
 TMP_LIST="$(mktemp)"
-trap 'rc=$?; rm -f "$TMP_LIST"; pki_exit "$rc"' EXIT
+TMP_EXPORT=""
+trap 'rc=$?; rm -f "$TMP_LIST"; [[ -z "$TMP_EXPORT" ]] || rm -f "$TMP_EXPORT"; pki_exit "$rc"' EXIT
 INCLUDE_REVOKED="$INCLUDE_REVOKED" INCLUDE_EXPIRED="$INCLUDE_EXPIRED" \
   pki_records list "$INDEX" > "$TMP_LIST"
 info "Listing from index: $INDEX" >&2
 if [[ "$OUT" == "-" ]]; then
   cat "$TMP_LIST"
 else
-  mkdir -p "$(dirname "$OUT")"
-  install -m 600 "$TMP_LIST" "$OUT"
+  durability_begin || die "Cannot establish durable inventory intent"
+  mkdir -p "$ROOT_DIR/out"
+  TMP_EXPORT="$(mktemp "$ROOT_DIR/out/.inventory.XXXXXX")"
+  install -m 600 "$TMP_LIST" "$TMP_EXPORT"
+  # Same-directory rename replaces the directory entry, never a linked inode.
+  mv -f "$TMP_EXPORT" "$OUT"
+  TMP_EXPORT=""
   info "Inventory written: $OUT" >&2
 fi
 exit 0

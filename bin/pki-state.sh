@@ -26,7 +26,14 @@ workspace_path() {
   ! has_control_chars "$raw" || die "Control character in path"
   case "/$raw/" in */../*) die "Path must stay within the workspace (no '..'): $raw" ;; esac
   [[ "$raw" == /* ]] || raw="$ROOT_DIR/$raw"
-  resolved="$(canonicalize_path_allow_missing "$raw")" || return 1
+  if [[ "${2:-target}" == entry ]]; then
+    # A recovery link action replaces the directory entry, including an old
+    # absolute alias during offline relocation; its new target is checked apart.
+    resolved="$(canonicalize_path_allow_missing "$(dirname "$raw")")" || return 1
+    resolved="$resolved/$(basename "$raw")"
+  else
+    resolved="$(canonicalize_path_allow_missing "$raw")" || return 1
+  fi
   case "$resolved" in "$ROOT_DIR"/*) ;; *) die "Path resolves outside workspace: $raw -> $resolved" ;; esac
   # These paths are excluded from persistence scans and must never hold CA data.
   case "${resolved#"$ROOT_DIR/"}" in
@@ -38,6 +45,22 @@ workspace_path() {
   printf '%s\n' "$resolved"
 }
 
+# One admission rule for authority data and recovery destinations. Check both
+# the requested namespace and the physical target, including missing paths.
+data_path() {
+  local raw="$1" absolute relative
+  [[ "$raw" == /* ]] || raw="$ROOT_DIR/$raw"
+  absolute="$(workspace_path "$raw" "${2:-target}")" || return 1
+  for relative in "${raw#"$ROOT_DIR/"}" "${absolute#"$ROOT_DIR/"}"; do
+    case "$relative" in
+      .git|.git/*|.locks|.locks/*|.recovery|.recovery/*|bin|bin/*|test|test/*|profiles|profiles/*|specifications|specifications/*)
+        die "Reserved PKI data path: $relative" ;;
+      out|out/*) die "Reserved inventory export directory cannot hold an authority: $relative" ;;
+    esac
+  done
+  printf '%s\n' "$absolute"
+}
+
 resolve_authority() {
   local raw="$1" absolute
   [[ -n "$raw" ]] || die "Missing authority selector"
@@ -46,9 +69,48 @@ resolve_authority() {
     /*|*/*|intm-*|intermediate) ;;
     *) [[ -e "$ROOT_DIR/$raw" ]] || raw="intm-${raw}-ca" ;;
   esac
-  absolute="$(workspace_path "$raw")" || return 1
+  absolute="$(data_path "$raw")" || return 1
   [[ "$absolute" != "$ROOT_DIR/root" ]] || die "Root is not an intermediate authority"
   printf '%s\n' "${absolute#"$ROOT_DIR/"}"
+}
+
+# Inventory exports have a deliberately flat, dedicated namespace. Validate
+# lexical and physical paths; reject even aliases pointing back into out/.
+inventory_output_path() {
+  local raw="$1"
+  python3 -B - "$ROOT_DIR" "$raw" <<'PYEXPORT'
+import os
+from pathlib import Path
+import stat
+import sys
+
+root = Path(sys.argv[1])
+raw = sys.argv[2]
+try:
+    relative = raw[len(str(root)) + 1:] if raw.startswith(str(root) + "/") else raw
+    parts = relative.split("/")
+    if (len(parts) != 2 or parts[0] != "out" or not parts[1].endswith(".tsv")
+            or parts[1].startswith(".") or any(ord(c) < 32 or ord(c) == 127 for c in raw)):
+        raise ValueError("OUT must be out/<name>.tsv (or OUT=- for stdout)")
+    folder = root / "out"
+    target = folder / parts[1]
+    if folder.is_symlink() or (folder.exists() and not folder.is_dir()):
+        raise ValueError("out/ must be a real directory, not an alias")
+    # Existing installations may predate the reservation of out/ for exports.
+    for marker in ("openssl.cnf", "index.txt", "serial", "crlnumber", "ca.meta",
+                   "meta", "private", "certs", "newcerts", "generations", "issuers"):
+        if os.path.lexists(folder / marker):
+            raise ValueError("out/ contains authority state: " + marker)
+    if os.path.lexists(target):
+        metadata = target.lstat()
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise ValueError("export destination must be a regular file without links")
+    if target.resolve() != target:
+        raise ValueError("export destination must not use aliases")
+except (ValueError, OSError, RuntimeError) as error:
+    sys.exit("[ERR] Unsafe inventory destination " + raw + ": " + str(error))
+print(target)
+PYEXPORT
 }
 
 # Resolve a data artifact without allowing it to escape the selected authority.
@@ -56,14 +118,14 @@ authority_path() {
   local base="$1" item="$2" absolute
   [[ "$base" == /* ]] || base="$ROOT_DIR/$base"
   [[ "$item" == /* ]] || item="$base/$item"
-  absolute="$(workspace_path "$item")" || return 1
+  absolute="$(data_path "$item")" || return 1
   case "$absolute" in "$base"/*) printf '%s\n' "$absolute" ;; *) die "Artifact escapes authority $base: $item" ;; esac
 }
 
 check_authority_paths() {
   local base="$1" item
   [[ "$base" == /* ]] || base="$ROOT_DIR/$base"
-  base="$(workspace_path "$base")" || return 1
+  base="$(data_path "$base")" || return 1
   for item in openssl.cnf index.txt index.txt.tmp index.txt.old index.txt.new index.txt.attr index.txt.attr.old index.txt.attr.new serial serial.old serial.new crlnumber crlnumber.old crlnumber.new serial.last ca.meta meta .disabled private certs csr newcerts crl generations issuers; do
     authority_path "$base" "$item" >/dev/null
   done

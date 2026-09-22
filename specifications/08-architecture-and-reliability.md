@@ -269,3 +269,21 @@ An importer should discover root/active/legacy/rollback directories; parse certi
 Maintain PEM/DER export and chain ordering for external consumers. If replacing OpenSSL's database internally, provide a documented import/export mapping and migration report. Preserve revoked history, disabled markers, timestamps, historical keys, and raw subject/SAN contents. Byte-identical certificates are not required because keys, serial policy, times, and signatures can vary; decoded semantics and trust behavior are the compatibility criteria.
 
 No performance target, maximum population, multi-host locking guarantee, or availability SLA is established in the project. Such requirements must be selected separately rather than inferred from these scripts.
+
+### Data-path admission (AUD-02)
+
+Creation, authority selection, directory moves and verified recovery share the
+same data-path admission rule. The workspace source trees (`bin`, `test`,
+`profiles`, `specifications`), Git/lock/recovery trees and inventory `out` tree
+cannot contain authority data. Both requested names and physical alias targets
+are checked. Nested custom authorities and aliases to admitted data remain
+supported. Leaf issuance validates future installation and evidence paths,
+including serial-derived filenames and replacement outputs, before signing;
+recovery repeats validation before installation. These checks do not replace
+the workspace lock or protect against noncooperating external writers.
+
+Validation on 2026-09-22: 31 distinct methods passed incrementally across stage 1
+(10), stage 2 (9), stage 10 (11) and the stage-11 excluded-path test (1), with
+successful reruns after correcting the initial missing `issuers/` preflight
+parent. Bash/Python syntax and diff checks passed. Disposable local PKIs only;
+no full-suite, smoke, live-CA or hardware qualification is claimed.

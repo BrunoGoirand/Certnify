@@ -545,6 +545,46 @@ fi
 info "Next leaf serial (preview): ${_next_hex}"
 unset _next_hex
 
+# Admit every future installation/guard path before the signing backend can
+# consume a serial. The workspace lock keeps the predicted serial stable.
+mkdir -p "$INT_DIR/issuers"
+PLAN_SERIAL="$(cat "$INT_DIR/serial" | tr '[:lower:]' '[:upper:]')"
+# OpenSSL renders serials with an even number of digits, without redundant zeros.
+while [[ "${#PLAN_SERIAL}" -gt 1 && "$PLAN_SERIAL" == 0* ]]; do PLAN_SERIAL="${PLAN_SERIAL#0}"; done
+if (( ${#PLAN_SERIAL} % 2 )); then PLAN_SERIAL="0$PLAN_SERIAL"; fi
+PLAN_KEY="$KEY_PATH"; PLAN_CSR="$CSR_PATH"; PLAN_CRT="$CRT_PATH"
+if [[ "$ROTATE_MODE" == 1 || -n "$CANON_LEAF_KEY" ]]; then
+  PLAN_KEY="$INT_DIR/private/srl-${PLAN_SERIAL}-${ARTIFACT_STEM}.key.pem"
+  PLAN_CSR="$INT_DIR/csr/srl-${PLAN_SERIAL}-${ARTIFACT_STEM}.csr.pem"
+  PLAN_CRT="$INT_DIR/certs/srl-${PLAN_SERIAL}-${ARTIFACT_STEM}.cert.pem"
+elif [[ -e "$PLAN_CRT" ]]; then
+  PLAN_CRT="$INT_DIR/certs/srl-${PLAN_SERIAL}-${ARTIFACT_STEM}.cert.pem"
+fi
+PLAN_CHAIN="${PLAN_CRT%.cert.pem}.fullchain.cert.pem"
+for output in "$PLAN_KEY" "$PLAN_CSR" "$PLAN_CRT" "$PLAN_CHAIN" \
+  "$KEY_PATH" "$CSR_PATH" "$INT_DIR/index.txt" "$INT_DIR/serial" "$INT_CNF" \
+  "$INT_DIR/newcerts/$PLAN_SERIAL.pem" "$INT_DIR/issuers/$PLAN_SERIAL" \
+  "$INT_DIR/issuers/$PLAN_SERIAL.policy" "$INT_DIR/certs/ca.cert.pem" \
+  "$ROOT_DIR/root/certs/ca.cert.pem" "$ROOT_DIR/root/index.txt"; do
+  recovery_relative "$output" >/dev/null
+  [[ ! -d "$output" ]] || die "Recovery destination is a directory: $output"
+done
+for output in "$PLAN_CRT" "$PLAN_CHAIN"; do
+  [[ ! -e "$output" && ! -L "$output" ]] || die "Certificate destination already exists: $output"
+done
+if [[ "$PLAN_KEY" != "$KEY_PATH" ]]; then
+  for output in "$PLAN_KEY" "$PLAN_CSR"; do
+    [[ ! -e "$output" && ! -L "$output" ]] || die "Key/CSR destination already exists: $output"
+  done
+fi
+if [[ -n "$CANON_LEAF_KEY" ]]; then
+  for output in "$CANON_LEAF_KEY" "$INT_DIR/csr/${ARTIFACT_STEM}.csr.pem" \
+    "$INT_DIR/certs/${ARTIFACT_STEM}.cert.pem" "$INT_DIR/certs/${ARTIFACT_STEM}.fullchain.cert.pem"; do
+    recovery_relative "$output" >/dev/null
+    [[ ! -d "$output" ]] || die "Recovery destination is a directory: $output"
+  done
+fi
+
 # ---- Sign with intermediate into a temp file ----
 TMPCRT="$(mktemp "$INT_DIR/certs/.tmp.XXXXXX")"
 recovery_signing "$INT_DIR" "$TMPCRT"

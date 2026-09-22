@@ -165,7 +165,7 @@ ensure_root_layout "root"
 
 ROOT_ABS="$(pwd)/root"
 ROOT_CNF="${ROOT_CNF:-$ROOT_DIR/root/openssl.cnf}"
-ROOT_CNF="$(workspace_path "$ROOT_CNF")"
+ROOT_CNF="$(data_path "$ROOT_CNF")"
 mkdir -p "$(dirname "$ROOT_CNF")"
 
 create_root_openssl_cnf_if_missing "$ROOT_CNF" "$ROOT_ABS" "$DAYS" "${ROOT_PATHLEN:-}"
@@ -375,4 +375,5 @@ fi
 # ---- Success message ----
 info "Done"
 
+root_allows_intermediate "$CRT_PATH" || warn "Root certificate cannot support Certnify intermediates: root -> intermediate -> leaf requires pathlen >= 1 or no limit. Intermediate and leaf issuance will be refused."
 recovery_complete

@@ -31,6 +31,48 @@ class State(unittest.TestCase):
     def make(self, *args, success=True, **env):
         return self.run_command(['make', *args, 'KEY_ALG=EC'], success, **env)
 
+    def test_reserved_authority_namespaces_fail_before_creation(self):
+        (self.work / 'reserved-alias').symlink_to('bin', target_is_directory=True)
+        for directory in ['bin/audit-ca', 'test/audit-ca', 'profiles/audit-ca',
+                          'specifications/audit-ca', '.recovery/audit-ca',
+                          '.git/audit-ca', '.locks/audit-ca', 'out/audit-ca',
+                          'reserved-alias/nested/audit-ca']:
+            with self.subTest(directory=directory):
+                before = snapshot(self.work / 'root')
+                self.make('intermediate', 'INT_DIR=' + directory,
+                          'KIND=web', 'CN=Rejected', success=False)
+                self.assertEqual(before, snapshot(self.work / 'root'))
+                self.assertFalse((self.work / directory).exists())
+                self.assertFalse((self.work / '.recovery/pending').exists())
+                r = self.run_command(['bash', '-c',
+                    'source bin/pki-env.sh; recovery_relative "$TARGET/index.txt"'],
+                    success=False, TARGET=directory)
+                self.assertIn('Reserved', r.stderr)
+
+    def test_leaf_plan_collision_rejected_before_signing(self):
+        self.assert_plan_collision(False)
+
+    def test_rotated_plan_collision_with_padded_serial(self):
+        self.assert_plan_collision(True)
+
+    def assert_plan_collision(self, rotate):
+        ca = self.work / 'intm-web-ca'
+        if rotate:
+            (ca / 'serial').write_text('00001000\n')
+        target = ca / ('certs/' + ('srl-1000-' if rotate else '') +
+                       'collision.example.fullchain.cert.pem')
+        target.write_text('sentinel')
+        before = {name: snapshot(ca / name) for name in ['newcerts']}
+        index = (ca / 'index.txt').read_bytes()
+        serial = (ca / 'serial').read_bytes()
+        self.make('server', 'CN=collision.example',
+                  'FORCE_NEW_KEY=' + ('rotate' if rotate else '0'), success=False)
+        self.assertEqual(index, (ca / 'index.txt').read_bytes())
+        self.assertEqual(serial, (ca / 'serial').read_bytes())
+        self.assertEqual(before, {name: snapshot(ca / name) for name in before})
+        self.assertEqual(target.read_text(), 'sentinel')
+        self.assertFalse((ca / 'certs/collision.example.cert.pem').exists())
+
     def test_rollover_legacy_crl_revoke_and_rollback(self):
         self.make('server', 'CN=old.example')
         self.make('rollover-web', 'INT_CN=State Web v2')

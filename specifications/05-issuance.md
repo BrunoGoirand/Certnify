@@ -51,6 +51,12 @@ is shortened or rewritten by these checks.
 Repeating the same DN does not renew validity or change path length. Explicitly
 empty ROOT_PATHLEN omits the constraint when composing a new configuration;
 existing installed configuration is never silently rebuilt from a new request.
+A root with pathlen=0 remains valid as a standalone root, with a warning, but
+cannot support Certnify's root -> intermediate -> leaf hierarchy. Intermediate
+creation/reissue, rollover and leaf issuance reject this signed root constraint
+before signing or changing authority artifacts. This preflight reads the actual
+root certificate, not ROOT_PATHLEN, configuration or metadata; changing the
+request does not repair an existing incompatible root.
 
 ## Intermediate
 
