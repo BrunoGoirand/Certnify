@@ -1,4 +1,97 @@
 # Effective cryptographic policy and safe artifact identities (MIT).
+
+# Read authority-owned metadata as data, never as shell code. Caller KIND and
+# action routing are not authoritative. Canonical names support legacy metadata.
+authority_issuance_kind() {
+  local base="$1" recorded="" inferred="" meta
+  meta="$(authority_path "$base" ca.meta)"
+  # Older layouts use meta; read it before any normalization writes occur.
+  if [[ ! -f "$meta" ]]; then meta="$(authority_path "$base" meta)"; fi
+  if [[ -f "$meta" ]]; then
+    recorded="$(awk -F= '$1=="KIND" {if(++n>1 || NF!=2 || $2=="") exit 1; value=$2} END {print value}' "$meta")" \
+      || die "Malformed issuance category in $meta"
+  fi
+  case "$base" in
+    intm-web-ca) inferred=web ;; intm-auth-ca) inferred=auth ;;
+    intm-code-ca) inferred=code ;; intm-smime-ca) inferred=smime ;;
+    intm-archive-ca) inferred=archive ;; intm-generic-ca) inferred=generic ;;
+  esac
+  [[ -z "$recorded" || -z "$inferred" || "$recorded" == "$inferred" ]] \
+    || die "Issuance category conflicts with authority directory: $meta ($recorded, expected $inferred)"
+  recorded="${recorded:-$inferred}"
+  case "$recorded" in web|auth|code|smime|archive|generic) ;;
+    *) die "Missing/unsupported issuance category in $meta; restore or explicitly review the authority metadata" ;;
+  esac
+  printf '%s\n' "$recorded"
+}
+
+# Decode signed extension values, rejecting duplicate extensions (including OID
+# aliases). Shared with preserving migration; SKI/AKI depend on key and issuer.
+certificate_policy_extensions() {
+  "$OPENSSL" asn1parse -in "$1" | LC_ALL=C awk '
+    /d=2 .*cons: *cont \[ *3 *\]/ {extensions=1; next}
+    extensions && /d=[01] / {extensions=0}
+    extensions && /d=5 .*prim: *OBJECT/ {
+      oid=$0; sub(/^.*OBJECT *:/,"",oid); critical=0
+      if(seen[oid]++) bad=1
+      next
+    }
+    extensions && /d=5 .*prim: *BOOLEAN/ {critical=1; next}
+    extensions && /d=5 .*prim: *OCTET STRING/ {
+      value=$0; sub(/^.*\[HEX DUMP\]:/,"",value)
+      if(value !~ /^[0-9A-Fa-f]+$/ || oid=="") bad=1
+      if(oid!="X509v3 Subject Key Identifier" && oid!="X509v3 Authority Key Identifier")
+        print oid "|" critical "|" value
+      count++; oid=""
+    }
+    END {if(bad || !count || oid!="") exit 1}
+  ' | LC_ALL=C sort
+}
+
+assert_certificate_issuance_kind() {
+  local cert="$1" base="$2" kind extensions eku expected bc
+  kind="$(authority_issuance_kind "$base")" || return 1
+  extensions="$(certificate_policy_extensions "$cert")" || die "Cannot decode unique extensions: $cert"
+  bc="$(printf '%s\n' "$extensions" | awk -F'|' '$1=="X509v3 Basic Constraints" {print $3}')"
+  [[ "$bc" == 3000 ]] || die "Issuance requires CA:false: $base / $EXT_SECTION"
+  eku="$(printf '%s\n' "$extensions" | awk -F'|' '$1=="X509v3 Extended Key Usage" {print $3}')"
+  # DER: a SEQUENCE containing exactly one id-kp-* OID. Missing, additional,
+  # unknown and anyExtendedKeyUsage values fail for restricted categories.
+  case "$kind" in
+    web) expected=300A06082B06010505070301 ;;
+    auth) expected=300A06082B06010505070302 ;;
+    code) expected=300A06082B06010505070303 ;;
+    smime) expected=300A06082B06010505070304 ;;
+    archive)
+      case "$EXT_SECTION:$eku" in
+        archive:|archive_seal:) return 0 ;;
+        *:300A06082B06010505070308) return 0 ;;
+      esac
+      die "Issuance category archive requires archive/archive_seal without EKU or timeStamping only: $base / $EXT_SECTION"
+      ;;
+    generic) return 0 ;;
+  esac
+  [[ "$eku" == "$expected" ]] || die "Issuance category $kind rejects profile $EXT_SECTION in $base (incompatible or missing EKU)"
+}
+
+issuance_category_preflight() (
+  # Compile the actual installed profile without touching any authority state.
+  set -e
+  local stage kind
+  kind="$(authority_issuance_kind "$INT_DIR")"
+  if [[ -n "${ACTION:-}" && "$kind" != generic ]]; then
+    [[ "$(expected_kind_for_action "$ACTION")" == "$kind" ]] \
+      || die "Issuance category $kind rejects action $ACTION in $INT_DIR"
+  fi
+  stage="$(mktemp -d)"
+  trap 'rm -rf "$stage"' EXIT
+  "$OPENSSL" genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out "$stage/key.pem" >/dev/null 2>&1
+  "$OPENSSL" req -new -x509 -key "$stage/key.pem" -subj /CN=issuance-preflight \
+    -config "$INT_CNF" -extensions "$EXT_SECTION" -days 1 -out "$stage/candidate.pem" >/dev/null 2>&1 \
+    || die "Cannot compile issuance profile: $INT_CNF / $EXT_SECTION"
+  assert_certificate_issuance_kind "$stage/candidate.pem" "$INT_DIR"
+)
+
 check_key_generation_policy() {
   local alg bits="$2" curve="$3"
   alg="$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')"

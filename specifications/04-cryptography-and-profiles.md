@@ -58,6 +58,52 @@ keys; use a signing profile for a signing-only key. A reused EC key remains EC
 when KEY_ALG=RSA is requested without forcing a new key. The profile is selected
 accordingly; an explicitly incompatible profile fails before signing.
 
+## Authority issuance categories
+
+Issuance enforces the authority category independently of caller routing flags.
+The resolved authority's `ca.meta` (or legacy `meta` if absent) supplies `KIND`; duplicate, empty, unknown or
+conflicting values fail closed. Canonical `intm-{web,auth,code,smime,archive,generic}-ca`
+directories also identify the category for old metadata without KIND. A custom
+directory without recorded KIND requires explicit offline review/restoration under
+chapter 01. Metadata is parsed as data, never sourced. Aliases use the resolved
+authority. Existing authorities cannot be reclassified through gen-intm, rollover
+or rollback.
+New authorities accept only the six categories; direct gen-intm without a category
+or conventional name records generic (the Make intermediate target defaults to web).
+
+| Category | Allowed leaf EKU |
+| --- | --- |
+| web | serverAuth only |
+| auth | clientAuth only |
+| code | codeSigning only |
+| smime | emailProtection only |
+| archive | timeStamping only, or absent for archive/archive_seal |
+| generic | No category-specific EKU restriction |
+
+For restricted categories, an explicit action must also match the category.
+PROFILE/EXT_SECTION and routing flags cannot bypass this policy. Custom sections
+remain supported when their compiled EKU matches the table. Before CA maintenance,
+key creation or signing, a disposable-key certificate compiles the installed
+profile; decoded DER checks reject wrong, missing, multiple or unrestricted EKUs
+and duplicate extensions, including numeric OID aliases. The signed leaf is checked
+again; a post-signing mismatch blocks publication and retains recovery evidence.
+Preserving batch migration checks every destination profile before claiming any
+row, including dry-run, and the child issuance rechecks under its own lock.
+Custom ISSUE_CMD remains privileged operator code outside these guarantees.
+
+This is an issuance policy enforced by Certnify, not a cryptographic trust-domain
+boundary. CA certificates still have no category EKU/name constraints. Existing
+certificates are not modified or revoked. generic is deliberately unrestricted;
+archive/archive_seal have no EKU, so client-side purpose isolation cannot be inferred
+from those profiles. Private-key use outside Certnify or metadata/configuration
+tampering is outside the guard. Stronger isolation needs separately protected keys,
+appropriately constrained trust anchors and client-specific validation qualification.
+
+The dedicated generic action requires an explicit PROFILE/EXT_SECTION and a
+generic authority. It defaults to 397 days and adds no implicit CN SAN. It uses
+the same key compatibility, CA:false and compiled/signed extension checks; it does
+not introduce a new universal leaf profile or weaken the specialized categories.
+
 ## SAN contract
 
 An explicit nonempty SAN or SAN_* list is authoritative: no default CN SAN is

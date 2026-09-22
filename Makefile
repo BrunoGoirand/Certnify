@@ -31,7 +31,7 @@
 #     ex. make user   INT_DIR=intm-clients  → INT_DIR prioritaire
 #
 # Vérification / Révocation (feuilles)
-#   make verify KIND=web FILE="path/to/cert.crt" [VERIFY_CRL=0|1] [VERIFY_MODE=normal|tolerate_revoked|info]
+#   make verify KIND=web FILE="path/to/cert.crt" [VERIFY_CRL=0|1] [VERIFY_MODE=normal|tolerate_revoked|info|strict]
 #     - ou via résolution par CN et choix d’intermédiaire :
 #       make verify KIND=web  CN="app.example.com"
 #       make verify INT_DIR="intm-smime-ca" CN="john@example.com"
@@ -74,7 +74,7 @@
 #   INT_DIR   : Dossier intermédiaire, ex. intm-web-ca (prioritaire sur KIND lorsqu’il est fourni).
 #   PROFILE   : Section d’extensions d’openssl.cnf (défauts déjà posés par TYPE).
 #   VERIFY_CRL: 0/1 — active la vérif CRL dans `make verify`.
-#   VERIFY_MODE: normal | tolerate_revoked | info — contrôle le code de sortie de `make verify`.
+#   VERIFY_MODE: normal | tolerate_revoked | info | strict — contrôle le code de sortie de `make verify`.
 #   CRL_DAYS  : Périodicité CRL (jours) pour `make crl`, `crl-all`, `revoke-intermediate` (CRL_UPDATE=1).
 #   MAP_PRIV_WITHDRAWN_TO : Raison de repli si REASON=privilegeWithdrawn (non supporté par OpenSSL CLI).
 #
@@ -95,15 +95,17 @@ help:
 	@echo '  make root CN="Root CA" [DAYS=7300]'
 	@echo '  make intermediate KIND=web CN="Web Issuing CA" [DAYS=3650]'
 	@echo '  make int-web|int-auth|int-code|int-smime|int-archive [CN="..."]'
+	@echo '  make int-generic [CN="Generic Issuing CA"]'
 	@echo '  -- Feuilles (INT_DIR auto-déduit; override possible via KIND=... ou INT_DIR=...):'
 	@echo '  make server  CN="app.example.com"   [SAN="DNS:app.example.com"] [DAYS=397]'
 	@echo '  make user    CN="john@example.com"  [SAN="email:john@example.com"] [DAYS=825]'
 	@echo '  make dev     CN="CI Signing Key"    [DAYS=730]'
 	@echo '  make email   CN="john@example.com"  [SAN="email:john@example.com"] [DAYS=730]'
 	@echo '  make doc     CN="Records Seal"      [DAYS=3600]'
+	@echo '  make generic CN="Signing Key" PROFILE=code_sign [DAYS=397]'
 	@echo '  aliases: make code / make archive'
 	@echo '  -- Vérification & Révocation:'
-	@echo '  make verify KIND=web FILE=".../cert.crt" [VERIFY_CRL=0|1] [VERIFY_MODE=normal|tolerate_revoked|info]'
+	@echo '  make verify KIND=web FILE=".../cert.crt" [VERIFY_CRL=0|1] [VERIFY_MODE=normal|tolerate_revoked|info|strict]'
 	@echo '  make revoke KIND=web FILE=".../cert.crt" (ou variables acceptées par revoke-leaf.sh)'
 	@echo '  make test-smoke'
 	@echo '  make clean [CLEAN_APPLY=1] (preview by default; apply deletes keys/history)'
@@ -391,7 +393,15 @@ int-archive:
 	bin/gen-intm.sh
 
 # --- Leaf issuance ---
-.PHONY: server user dev email doc code archive
+.PHONY: int-generic generic server user dev email doc code archive
+
+int-generic:
+	KIND="generic" CN="$${CN:-Generic Issuing CA}" DAYS="$${DAYS:-3650}" \
+	bin/gen-intm.sh
+
+# Explicit profile; the shared core verifies the authority-owned category.
+generic:
+	bin/gen-generic.sh
 
 # Server certs (legacy SAN kept + SAN_* pour scripts modernes)
 server:
@@ -681,3 +691,7 @@ test-stage10:
 .PHONY: test-stage11
 test-stage11:
 	python3 -B test/stage11.py
+
+.PHONY: test-stage12
+test-stage12:
+	python3 -B test/stage12.py

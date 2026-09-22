@@ -218,9 +218,10 @@ expected_kind_for_action() {
     dev)     printf '%s' 'code' ;;
     email)   printf '%s' 'smime' ;;
     doc)     printf '%s' 'archive' ;;
+    generic) printf '%s' 'generic' ;;
     # pour d'autres actions, on peut étendre ; par défaut: rien
     *)
-      die "Action inconnue: '${action}' (attendu: server|user|dev|email|doc)"
+      die "Action inconnue: '${action}' (attendu: server|user|dev|email|doc|generic)"
       ;;
   esac
 }

@@ -12,7 +12,7 @@ The toolkit supports TLS servers, client authentication, code signing, S/MIME si
 | --- | --- |
 | Workspace | One physical project root; contains one root authority and zero or more intermediate directories |
 | Authority | Key pair, CA certificate, configuration, issuance database, next certificate serial, next CRL number |
-| Intermediate kind | Routing label: `web`, `auth`, `code`, `smime`, `archive`; custom kinds are possible |
+| Intermediate kind | Issuance category: `web`, `auth`, `code`, `smime`, `archive`, or unrestricted `generic` |
 | Authority generation | A specific CA certificate and key, distinct from the active directory name |
 | Certificate | Issuer-scoped serial, subject, public key, validity interval, extensions, signature |
 | Request | Subject, public key and requested extensions in a PKCS#10 CSR |
@@ -23,7 +23,7 @@ The toolkit supports TLS servers, client authentication, code signing, S/MIME si
 | Pending operation | Recovery journal recording an uncertain or unfinished issuance/directory transition |
 | Disabled marker | Local policy switch preventing ordinary issuance from an intermediate |
 
-A CN is a subject attribute, not a globally unique certificate identity or a general-purpose filename. New artifact names follow the mapping in chapter 03. Serial numbers are unique within an issuer database, not across the workspace. Two intermediates can issue serial `1000` independently. A kind is a routing convention, not a cryptographic restriction: all standard leaf profiles are present in every generated intermediate configuration.
+A CN is a subject attribute, not a globally unique certificate identity or a general-purpose filename. New artifact names follow the mapping in chapter 03. Serial numbers are unique within an issuer database, not across the workspace. Two intermediates can issue serial `1000` independently. A kind controls routing and the toolkit issuance policy defined in chapter 04. All standard leaf profiles remain present in generated configurations, but only compatible usages can be issued through Certnify. This does not constrain direct private-key use outside the toolkit.
 
 ## State model
 

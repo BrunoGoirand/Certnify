@@ -2,26 +2,7 @@
 # Never source metadata/configuration as shell code.
 
 migration_extensions() {
-  # Compare raw extension values and criticality, independently of display text.
-  # SKI and AKI must follow the new key and issuer, not the old certificate.
-  "$OPENSSL" asn1parse -in "$1" | LC_ALL=C awk '
-    /d=2 .*cons: *cont \[ *3 *\]/ {extensions=1; next}
-    extensions && /d=[01] / {extensions=0}
-    extensions && /d=5 .*prim: *OBJECT/ {
-      oid=$0; sub(/^.*OBJECT *:/,"",oid); critical=0
-      if(seen[oid]++) bad=1
-      next
-    }
-    extensions && /d=5 .*prim: *BOOLEAN/ {critical=1; next}
-    extensions && /d=5 .*prim: *OCTET STRING/ {
-      value=$0; sub(/^.*\[HEX DUMP\]:/,"",value)
-      if(value !~ /^[0-9A-Fa-f]+$/ || oid=="") bad=1
-      if(oid!="X509v3 Subject Key Identifier" && oid!="X509v3 Authority Key Identifier")
-        print oid "|" critical "|" value
-      count++; oid=""
-    }
-    END {if(bad || !count || oid!="") exit 1}
-  ' | LC_ALL=C sort
+  certificate_policy_extensions "$1"
 }
 
 migration_subject() (
@@ -128,4 +109,5 @@ migration_preflight() (
     -copy_extensions copy -extfile "$INT_CNF" -extensions "$EXT_SECTION" -days 1 \
     -out "$stage/candidate.pem" >/dev/null 2>&1 || die "Cannot compile destination migration profile: $EXT_SECTION"
   migration_compare "$MIGRATION_CERT" "$stage/candidate.pem"
+  assert_certificate_issuance_kind "$stage/candidate.pem" "$1"
 )

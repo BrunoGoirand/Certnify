@@ -9,12 +9,13 @@ Run Make from the project root. The default target is `help`. Variables are stri
 | `help` | Print the primary command summary |
 | `root` | `gen-root.sh`: initialize or validate the root |
 | `intermediate` | `gen-intm.sh`: generic intermediate; Make defaults kind to `web`, CN to `Web Issuing CA` |
-| `int-web`, `int-auth`, `int-code`, `int-smime`, `int-archive` | Same intermediate generator, with kind-specific CN defaults |
+| `int-web`, `int-auth`, `int-code`, `int-smime`, `int-archive`, `int-generic` | Same intermediate generator, with kind-specific CN defaults |
 | `server` | `gen-server.sh` → `gen-leaf.sh`, action `server` |
 | `user` | `gen-user.sh` → `gen-leaf.sh`, action `user` |
 | `dev`, `code` | `gen-code.sh` → `gen-leaf.sh`, action `dev` |
 | `email` | `gen-email.sh` → `gen-leaf.sh`, action `email` |
 | `doc`, `archive` | `gen-archive.sh` → `gen-leaf.sh`, action `doc` |
+| `generic` | `gen-generic.sh` → `gen-leaf.sh`, action `generic`, explicit profile required |
 | `verify` | `verify.sh`: leaf chain/optional CRL evaluation |
 | `revoke` | `revoke-leaf.sh`: one leaf revocation |
 | `revoke-intermediate` | `revoke-intm.sh`: root database revocation and issuance disablement |
@@ -45,15 +46,27 @@ Run Make from the project root. The default target is `help`. Variables are stri
 | dev | code | 730 | `code_sign` | Code Signing Issuing CA |
 | email | smime | 730 | `smime` | S/MIME Issuing CA |
 | doc | archive | 3600 | `archive` | Archive Issuing CA |
+| generic | generic | 397 | Required: PROFILE or EXT_SECTION | Generic Issuing CA |
+
+`make int-generic` creates the generic intermediate (3650 days by default).
+`make generic` invokes `bin/gen-generic.sh`: CN and an explicit PROFILE or
+EXT_SECTION are required, with EXT_SECTION taking precedence. INT_DIR overrides
+the default intm-generic-ca selector, but the resolved authority must be generic.
+The action adds no implicit SAN and delegates key, identity, validity, issuance
+and recovery controls to gen-leaf. Caller ACTION/TYPE cannot override the wrapper's
+generic action. Direct gen-leaf ACTION=generic also requires an explicit profile.
 
 Root defaults: CN `Root CA`, 7300 days. Intermediate defaults: 3650 days. Direct `gen-intm.sh` defaults CN to `Example Intermediate CA` and, without a selector, directory to `intermediate`. Direct `gen-leaf.sh` defaults CN to `example.com`; without an action it uses 397 days and the effective-key server profile; an intermediate selector remains required.
 
 ## Intermediate selection
 
 For action-aware issuance, precedence is INT_DIR, then KIND, then the action
-mapping. REQUIRE_STRICT_KIND=1 rejects an inferable conflict with that mapping;
-default 0 permits cross-kind routing. ALLOW_KIND_FROM_DIR=1 permits kind inference
-from a conventional directory. Custom directories need not encode a kind.
+mapping. REQUIRE_STRICT_KIND=1 additionally rejects an inferable routing conflict;
+default 0 does not disable the authority-owned issuance policy in chapter 04.
+ALLOW_KIND_FROM_DIR=1 permits routing inference from a conventional directory.
+Custom directories need not encode a kind, but must record it in ca.meta.
+Restricted authorities reject mismatched actions and compiled profile usages;
+generic explicitly permits multiple usage families.
 Ordinary CRL selection uses CRL_INT_DIR > INT_DIR > KIND. Lifecycle shortcuts
 operate on canonical `intm-<kind>-ca` directory names.
 

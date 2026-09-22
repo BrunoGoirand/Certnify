@@ -92,6 +92,7 @@ Les raccourcis sont `int-web`, `int-auth`, `int-code`, `int-smime` et `int-archi
 | `dev`, `code` | `intm-code-ca` | 730 | `code_sign` |
 | `email` | `intm-smime-ca` | 730 | `smime` (signature et chiffrement combinés) |
 | `doc`, `archive` | `intm-archive-ca` | 3600 | `archive` |
+| `generic` | `intm-generic-ca` | 397 | Obligatoire : `PROFILE` ou `EXT_SECTION` |
 
 Ces exemples sont des choix d’émission indépendants ; chacun exige son autorité :
 
@@ -112,6 +113,35 @@ S/MIME combiné exigent RSA. `ARCHIVE_MODE=legacy` sélectionne `archive`, `seal
 sélectionne `archive_seal`, et `timestamp`/`timestamping` sélectionne `timestamping`.
 Ces modes fonctionnent avec les deux alias de cible. Les combinaisons explicites
 de clé et de profil incompatibles sont refusées.
+
+La catégorie enregistrée de l’autorité impose désormais l’usage émis : `web` →
+`serverAuth`, `auth` → `clientAuth`, `code` → `codeSigning`, `smime` →
+`emailProtection`. `archive` accepte l’horodatage ou les profils de sceau sans EKU.
+Le contrôle porte sur les extensions compilées, y compris pour un profil personnalisé ;
+`PROFILE`, `EXT_SECTION` et les options de routage ne le désactivent pas.
+Pour une nouvelle autorité volontairement polyvalente, utiliser explicitement
+`make intermediate KIND=generic INT_DIR=pki-data/general CN="General Issuing CA"`.
+La catégorie d’une autorité existante ne peut pas être changée par une variable
+d’environnement. Un ancien répertoire personnalisé sans `KIND` enregistré exige
+une revue/restauration hors ligne ; les noms canoniques restent reconnus.
+Ces règles protègent les émissions via Certnify, y compris les réémissions intégrées.
+Elles ne modifient aucun certificat existant et ne limitent pas l’utilisation directe
+d’une clé hors de l’outil. Voir les [contraintes d’émission](specifications/04-cryptography-and-profiles.md#authority-issuance-categories).
+
+Pour émettre depuis une autorité générique, avec une racine déjà créée :
+
+```sh
+make int-generic CN="Generic Issuing CA"
+make generic CN="Signing Key" PROFILE=code_sign KEY_ALG=Ed25519 DAYS=730
+make generic CN="app.example.test" PROFILE=server_ec KEY_ALG=EC SAN_DNS=app.example.test
+```
+
+Le script direct est `CN="Signing Key" PROFILE=code_sign bin/gen-generic.sh`.
+`INT_DIR` permet de sélectionner une autre autorité enregistrée `generic`.
+`EXT_SECTION` est prioritaire sur `PROFILE` ; aucun profil ni SAN dérivé du CN
+n’est choisi implicitement. Les paramètres habituels de clé, DN, SAN et durée
+s’appliquent. Le profil détermine l’usage réel du certificat ; la commande refuse
+une autorité spécialisée, même si le profil demandé lui serait compatible.
 
 | Paramètre | Signification / valeur par défaut |
 | --- | --- |
@@ -198,6 +228,15 @@ la commande.
 Les erreurs préalables échouent dans tous les modes. En mode info, lire
 `VERIFY STATUS` : un code de sortie nul ne prouve pas la validité. Par défaut,
 la vérification ne contrôle pas la révocation.
+
+Le rapport `VERIFY CHECKS` indique les contrôles demandés : chaîne, révocation,
+type d’identité et usage. `not-requested` signifie que le contrôle n’a pas été demandé,
+pas qu’il a réussi. `VERIFY STATUS: OK` ne vaut que pour les contrôles demandés ;
+un succès incomplet le rappelle explicitement. `VERIFY_PURPOSE=any` n’impose aucun
+usage précis. `CN` sélectionne le certificat et `KIND` l’autorité : ils ne remplacent
+pas l’identité et l’usage attendus, qui doivent provenir du besoin de l’application.
+Les commandes existantes et leurs codes de sortie restent inchangés.
+
 
 Pour les automatisations, `VERIFY_MODE=strict` exige une identité attendue (SAN ou sujet explicite) et
 un usage précis, impose les contrôles X.509 stricts et les CRL de toute la chaîne,

@@ -19,6 +19,8 @@ BASE_DIR="$(resolve_authority "intm-${KIND}-ca")"
 CN="$(validate_component_utf8 CN "$INT_CN" "${DN_MAXLEN:-128}")"
 if [[ -e "$BASE_DIR" ]]; then
   check_config "$BASE_DIR"
+  [[ "$(authority_issuance_kind "$BASE_DIR")" == "$KIND" ]] \
+    || die "Rollover cannot change issuance category: $BASE_DIR"
   archive_generation "$BASE_DIR"
   backfill_bindings "$BASE_DIR"
   tag="$(date +%Y%m%d%H%M%S)"; LEGACY_DIR="${BASE_DIR}-legacy-$tag"; n=0

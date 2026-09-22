@@ -42,6 +42,15 @@ filename. Only anchored numeric OpenSSL error 23 diagnostics, with no other
 numeric validation error and an otherwise valid chain, classify as `REVOKED`.
 All other backend failures classify as `ERROR`. The command prints the status
 and backend exit status separately.
+After completed verification, `VERIFY CHECKS` reports requested coverage, not
+individual check results: verification may stop at an earlier failure. It lists
+chain=required, revocation=not-requested/full-chain-crl, identity=not-requested
+or the selected identity type, and purpose=not-requested or the requested purpose.
+An OK result without revocation, identity or a specific purpose includes an
+explicit scope reminder. Purpose `any` is not a specific application purpose.
+This reporting does not change defaults, status values or exit codes. CN and KIND
+remain selectors, never inferred application expectations.
+
 
 | Mode | OK | REVOKED | ERROR from completed backend verification |
 | --- | --- | --- | --- |

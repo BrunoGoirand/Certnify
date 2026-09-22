@@ -166,14 +166,16 @@ class AuditFixes(unittest.TestCase):
         self.assertNotIn('must-not-leak', sans)
 
     def test_empty_request_and_profile_only_sans(self):
-        result = self.run_cmd(['bin/gen-leaf.sh'], CN='No SAN Signing', KIND='web', ACTION='dev')
+        self.run_cmd(['make', 'int-code', 'CN=Code Issuer'])
+        self.ca = self.work / 'intm-code-ca'
+        result = self.run_cmd(['bin/gen-leaf.sh'], CN='No SAN Signing', KIND='code', ACTION='dev')
         self.assertNotIn('unbound variable', result.stdout + result.stderr)
         cert = self.ca / 'certs/No SAN Signing.cert.pem'
         decoded = self.run_cmd([self.backend, 'x509', '-in', str(cert), '-noout', '-text']).stdout
         self.assertNotIn('X509v3 Subject Alternative Name:', decoded)
         cnf = self.ca / 'openssl.cnf'
         cnf.write_text(cnf.read_text().replace('[ code_sign ]', '[ code_sign ]\nsubjectAltName = URI:urn:example:signing'))
-        result = self.run_cmd(['bin/gen-leaf.sh'], CN='Profile SAN Signing', KIND='web', ACTION='dev')
+        result = self.run_cmd(['bin/gen-leaf.sh'], CN='Profile SAN Signing', KIND='code', ACTION='dev')
         self.assertNotIn('unbound variable', result.stdout + result.stderr)
         cert = self.ca / 'certs/Profile SAN Signing.cert.pem'
         decoded = self.run_cmd([self.backend, 'x509', '-in', str(cert), '-noout', '-ext', 'subjectAltName']).stdout
@@ -193,11 +195,12 @@ class AuditFixes(unittest.TestCase):
             self.assertEqual(old, cert.read_bytes())
             subject = self.run_cmd([self.backend, 'x509', '-in', str(cert), '-noout', '-subject', '-nameopt', 'RFC2253,utf8,-esc_msb']).stdout
             self.assertIn(options['CN'], subject)
+        self.run_cmd(['make', 'int-code', 'CN=Code Issuer'])
         cn = 'Élodie 東京 / A+B'
-        self.run_cmd(['bin/gen-code.sh'], CN=cn, INT_DIR='intm-web-ca')
-        self.run_cmd(['bin/gen-code.sh'], False, CN=cn, INT_DIR='intm-web-ca')
-        self.run_cmd(['bin/verify.sh'], CN=cn, KIND='web')
-        self.run_cmd(['bin/revoke-leaf.sh'], CN=cn, KIND='web', CRL_UPDATE='0')
+        self.run_cmd(['bin/gen-code.sh'], CN=cn, INT_DIR='intm-code-ca')
+        self.run_cmd(['bin/gen-code.sh'], False, CN=cn, INT_DIR='intm-code-ca')
+        self.run_cmd(['bin/verify.sh'], CN=cn, KIND='code')
+        self.run_cmd(['bin/revoke-leaf.sh'], CN=cn, KIND='code', CRL_UPDATE='0')
 
     def test_utf8_validation_and_special_dn_comparison(self):
         before = self.state()

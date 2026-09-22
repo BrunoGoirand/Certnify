@@ -23,6 +23,12 @@ EXT_SECTION est prioritaire. Une combinaison incompatible est refusée. Une list
 SAN ou SAN_* explicite supprime l’ajout implicite du CN. Protéger les arguments
 dans le shell : le CN reste une donnée, pas du code à évaluer.
 
+Le profil doit aussi respecter la catégorie enregistrée de l’autorité. Changer
+PROFILE, EXT_SECTION ou KIND à l’émission ne permet pas à une autorité `web`
+d’émettre du `codeSigning`. Les sections personnalisées sont contrôlées sur leurs
+extensions compilées. Une autorité polyvalente doit être créée avec `KIND=generic` ;
+ce choix ne constitue pas une séparation cryptographique des usages.
+
 Les fragments de `profiles/` servent uniquement aux nouvelles configurations.
 Pour modifier une autorité existante, conserver sa configuration, examiner les
 extensions souhaitées puis modifier explicitement son openssl.cnf installé.

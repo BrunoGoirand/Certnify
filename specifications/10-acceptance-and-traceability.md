@@ -33,6 +33,7 @@ process termination and mocked barriers do not satisfy that qualification.
 | make test-stage9 | 5 | Preserving batch migration, fresh key parameters, source/profile admission and explicit compatibility mode |
 | make test-stage10 | 11 | Hold release, verified installation recovery and workspace relocation |
 | make test-stage11 | 13 | Persistence ordering/errors, excluded-path admission, durable checkpoints, backend kill and safe resumption |
+| make test-stage12 | 8 | Authority categories, compiled EKUs, custom profiles/paths, immutable category, batch admission, post-signing fencing and explicit generic command |
 | make test-smoke | Integration workflow | Kinds, profiles, SANs, issuance, revocation, rekey and CLI examples |
 
 The stage-numbered command names are stable test-suite identifiers, not an active
@@ -81,6 +82,7 @@ This records test scope, not a guarantee for untested systems or every failure p
 | A35 | Required | Release only certificateHold on a leaf/intermediate; retain permanent revocations, expired status, unrelated disable flags and archived CRLs; publish matching current PEM/DER and reject stale final-CRL replay |
 | A36 | Required | Resume sealed installation after index/key/certificate interruption without signing or advancing counters; refuse changed/missing sources, key-alias target drift, expired validity and unsealed plans |
 | A37 | Required | Preview/apply offline workspace rebinding, including nested/historical authorities and internal absolute aliases; preserve state, reject unsafe configs, resume partial config/alias installation |
+| A38 | Required | Enforce authority-owned issuance categories on compiled profiles and signed leaves; reject category changes and incompatible preserving batches before mutation; retain a blocking journal after unexpected signed usage |
 
 ## Evidence limits
 
@@ -109,6 +111,7 @@ used by these tests.
 | bin/gen-root.sh | 05 root workflow; 03 root metadata; 04 root digest/path length |
 | bin/gen-intm.sh | 05 intermediate renewal/rekey; 03 archives and aliases |
 | bin/gen-leaf.sh | 05 leaf workflow; 04 SAN handling; 03 names, duplicate selection and serials |
+| bin/pki-policy.sh | 04 effective key/profile compatibility, authority category resolution and compiled/signed usage admission |
 | bin/gen-server.sh, bin/gen-user.sh | 02 defaults/profile precedence; 04 key-sensitive profile selection |
 | bin/gen-code.sh | 02 dev/code routing and defaults |
 | bin/gen-email.sh, bin/gen-archive.sh | 02 mode parsing; 04 specialized profiles |
@@ -253,3 +256,42 @@ last admission/review refinements; the corresponding targeted tests passed after
 them. This is incremental regression evidence, not a claim that every suite was
 rerun against one final frozen revision. The final syntax, source-manifest/local
 link and diff checks passed. No hardware power loss or Linux execution was tested.
+
+## Issuance category validation (2026-09-22)
+
+**29 distinct test methods passed**, using source-only disposable PKIs on macOS,
+Bash 3.2.57, GNU Make 3.81, OpenSSL 3.6.4 and Python 3.14.7:
+
+- Stage 2: all 6 methods, including concurrent writers, rekey, rollover/rollback
+  and legacy metadata normalization.
+- Stage 5: all 8 methods through the suite and targeted reruns of the 3 fixtures
+  updated to use code/S/MIME authorities instead of cross-category web issuance.
+- Stage 7: the 2 updated no-SAN/profile-SAN and UTF-8 identity/idempotence methods.
+- Stage 8: the 2 updated email/CN-fallback and URI/subject/reference-time methods.
+- Stage 9: all 5 preserving migration methods, including RSA and EdDSA variants.
+- Stage 12: all 6 methods through the suite and targeted reruns after fixture
+  corrections and the rollback guard. These include compiled OID-alias rejection,
+  immutable-state refusal, whole-batch admission and post-signing mismatch handling.
+
+The post-signing test retains the pending signing-outcome-uncertain journal,
+publishes no named certificate and blocks the next command. An orderly failure
+can retire the power-loss marker while retaining this blocking journal, consistent
+with chapter 08. No automatic repair or re-signing was introduced.
+
+This is incremental regression evidence, not a full-suite run on one frozen final
+revision. Smoke and the remaining suites were not rerun. Bash/Python syntax, the
+93-file source manifest, relative documentation link targets and git diff --check
+passed. No operational authority was modified. Direct key use, client-side trust
+domain isolation and additional OpenSSL/platform combinations remain outside this
+validation; CA certificates have not acquired category-specific constraints.
+
+### Dedicated generic command follow-up (2026-09-22)
+
+The two added stage-12 methods passed with real disposable issuance through make
+generic and bin/gen-generic.sh, covering int-generic creation, Ed25519/codeSigning,
+serverAuth and explicit DNS SAN, EXT_SECTION precedence, a custom authority path,
+required inputs, invalid/CA profiles and specialized-authority rejection without
+state changes. The environment matches the category validation above. These two
+methods are additional to its 29 distinct methods; other suites and smoke were not
+rerun for this follow-up. Make help, Bash/Python syntax, the updated 94-file source
+manifest and diff checks passed. No operational PKI was modified.

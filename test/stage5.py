@@ -120,8 +120,9 @@ class Policy(unittest.TestCase):
         self.assertTrue(list((self.ca / 'policies').glob('*.cnf')))
         self.make('revoke', 'KIND=web', 'SERIAL=1001', 'CRL_UPDATE=0')
         self.make('server', 'CN=reused.example', 'KEY_ALG=RSA', 'PROFILE=server_cert', success=False)
-        self.make('email', 'INT_DIR=intm-web-ca', 'CN=sign@example.test', 'SMIME_MODE=sign')
-        self.make('email', 'INT_DIR=intm-web-ca', 'CN=encrypt@example.test', 'SMIME_MODE=encrypt', success=False)
+        self.make('int-smime', 'CN=Policy Mail')
+        self.make('email', 'INT_DIR=intm-smime-ca', 'CN=sign@example.test', 'SMIME_MODE=sign')
+        self.make('email', 'INT_DIR=intm-smime-ca', 'CN=encrypt@example.test', 'SMIME_MODE=encrypt', success=False)
         for alg in ['Ed25519', 'Ed448']:
             self.make('server', 'CN=' + alg.lower() + '.example', 'KEY_ALG=' + alg)
             self.assertNotIn('Key Encipherment', self.cert('intm-web-ca/certs/' + alg.lower() + '.example.cert.pem'))
@@ -141,18 +142,22 @@ class Policy(unittest.TestCase):
         r = self.run_cmd(['bash', 'bin/gen-leaf.sh'], INT_DIR='intm-web-ca', CN='direct.example', KEY_ALG='Ed448', SAN='DNS:direct.example')
         self.assertTrue((self.ca / 'certs/direct.example.cert.pem').exists(), r.stdout + r.stderr)
         self.assertNotIn('Key Encipherment', self.cert('intm-web-ca/certs/direct.example.cert.pem'))
-        self.make('code', 'INT_DIR=intm-web-ca', 'CN=collision')
+        self.make('int-code', 'CN=Policy Code')
+        self.ca = self.work / 'intm-code-ca'
+        self.make('code', 'CN=collision')
         mapping = self.ca / 'names/collision.cn'
         mapping.chmod(0o600)
         mapping.write_text('different identity\n')
         before = snapshot(self.ca)
-        self.make('code', 'INT_DIR=intm-web-ca', 'CN=collision', success=False)
+        self.make('code', 'CN=collision', success=False)
         self.assertEqual(before, snapshot(self.ca))
 
     def test_unsafe_cn_is_data_and_reserved_names_do_not_collide(self):
+        self.make('int-code', 'CN=Policy Code')
+        self.ca = self.work / 'intm-code-ca'
         for cn in ['A/B', 'A_B', 'ca', 'chain', "O\"Brien $ENV::HOME # tag", "$(touch injected)"]:
-            self.make('code', 'CN=' + cn, 'INT_DIR=intm-web-ca')
-            self.make('verify', 'KIND=web', 'CN=' + cn)
+            self.make('code', 'CN=' + cn, 'INT_DIR=intm-code-ca')
+            self.make('verify', 'KIND=code', 'CN=' + cn)
         self.assertFalse((self.work / 'injected').exists())
         digest = hashlib.sha256(b'A/B').hexdigest()
         self.assertTrue((self.ca / ('certs/cn-' + digest + '.cert.pem')).exists())
@@ -160,8 +165,8 @@ class Policy(unittest.TestCase):
         self.assertTrue((self.ca / 'certs/ca.cert.pem').exists())
         # Import lookup uses durable history even when no current named artifact exists.
         (self.ca / ('certs/cn-' + digest + '.cert.pem')).unlink()
-        self.run_cmd(['bash', 'bin/verify.sh'], KIND='web', CN='A/B')
-        self.run_cmd(['bash', 'bin/revoke-leaf.sh'], KIND='web', CN='A/B', CRL_UPDATE='0')
+        self.run_cmd(['bash', 'bin/verify.sh'], KIND='code', CN='A/B')
+        self.run_cmd(['bash', 'bin/revoke-leaf.sh'], KIND='code', CN='A/B', CRL_UPDATE='0')
 
 
 if __name__ == '__main__':

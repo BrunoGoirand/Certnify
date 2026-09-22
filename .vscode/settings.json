@@ -1,0 +1,10 @@
+{
+    "workbench.editor.enablePreview": false,
+    "workbench.editor.enablePreviewFromQuickOpen": false,
+    "workbench.editor.showTabs": "single",
+    "editor.rulers": [4, 8, 12, 16, 20, 24, 28, 32, 36, 48, 60, 72, 84, 96],
+    "workbench.colorCustomizations": {
+        "editorRuler.foreground": "#f5f8f8"
+    }
+
+}

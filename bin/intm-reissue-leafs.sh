@@ -198,7 +198,7 @@ if [[ "$REISSUE_MODE" == preserve && -z "${ISSUE_CMD:-}" ]]; then
   INT_CNF="$ROOT_DIR/$ACTIVE_DIR/openssl.cnf"
   source_plan="$(mktemp)"
   while IFS=$'\x1F' read -r serial expires cn; do
-    source_id="$( set -e; migration_load "$LEGACY_DIR" "$serial" "$cn" "$expires"; migration_preflight; certificate_id "$MIGRATION_CERT" )"
+    source_id="$( set -e; migration_load "$LEGACY_DIR" "$serial" "$cn" "$expires"; migration_preflight "$ACTIVE_DIR"; certificate_id "$MIGRATION_CERT" )"
     printf '%s\037%s\037%s\037%s\n' "$serial" "$expires" "$cn" "$source_id" >> "$source_plan"
   done < "$PARSED_INPUT"
   mv "$source_plan" "$PARSED_INPUT"

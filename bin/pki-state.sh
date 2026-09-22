@@ -256,7 +256,7 @@ normalize_ca_artifacts() {
   tmp="$(mktemp "$base/certs/chain.tmp.XXXXXX")"
   cat "$base/certs/ca.cert.pem" "$ROOT_DIR/root/certs/ca.cert.pem" > "$tmp"
   chmod 444 "$tmp"
-  mv "$tmp" "$base/certs/ca.chain.cert.pem"
+  mv -f "$tmp" "$base/certs/ca.chain.cert.pem"
   staged_link ca.chain.cert.pem "$base/certs/chain.cert.pem"
   if [[ ! -f "$base/ca.meta" && -f "$base/meta" ]]; then install -m 444 "$base/meta" "$base/ca.meta"; fi
   if [[ -f "$base/ca.meta" ]]; then
@@ -266,7 +266,7 @@ normalize_ca_artifacts() {
       /^POLICY_SHA256=/ {print "POLICY_SHA256=" ENVIRON["PKI_META_POLICY"]; next}
       {print} END {if(!seen) print "INT_DIR=" ENVIRON["PKI_META_DIR"]}
     ' "$base/ca.meta" > "$tmp"
-    chmod 444 "$tmp"; mv "$tmp" "$base/ca.meta"
+    chmod 444 "$tmp"; mv -f "$tmp" "$base/ca.meta"
   fi
   serial="$(openssl_serial "$base/certs/ca.cert.pem")"
   printf '%s\n' "$serial" > "$base/serial.last"

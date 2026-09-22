@@ -23,6 +23,11 @@ Incompatible key/profile combinations fail rather than silently changing usage.
 An explicit SAN or SAN_* list suppresses the default CN SAN. Quote shell arguments;
 quotes in CN are data, not a safe substitute for shell quoting.
 
+The profile must also match the authority's recorded category. Changing PROFILE,
+EXT_SECTION or caller KIND cannot make a web authority issue codeSigning leaves.
+Custom sections are checked using compiled extensions. Create an intentionally
+multipurpose authority with KIND=generic; this does not isolate usage trust domains.
+
 Profile fragments under `profiles/` compose new configurations only. To change an
 existing authority, retain its current configuration, review intended extension
 changes, then explicitly edit the installed openssl.cnf. Do not overwrite operator

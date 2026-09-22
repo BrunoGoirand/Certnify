@@ -86,6 +86,7 @@ required intermediate before issuing leaves. Shortcuts are `int-web`, `int-auth`
 | `dev`, `code` | `intm-code-ca` | 730 | `code_sign` |
 | `email` | `intm-smime-ca` | 730 | `smime` (combined signing/encryption) |
 | `doc`, `archive` | `intm-archive-ca` | 3600 | `archive` |
+| `generic` | `intm-generic-ca` | 397 | Required: `PROFILE` or `EXT_SECTION` |
 
 Examples below are independent issuance choices, requiring their corresponding authorities:
 
@@ -105,6 +106,34 @@ make archive CN="Timestamp Signer" ARCHIVE_MODE=timestamp DAYS=3600
 `ARCHIVE_MODE=legacy` selects `archive`, `seal` selects `archive_seal`, and
 `timestamp`/`timestamping` selects `timestamping`. These work with either target alias.
 Explicit incompatible key/profile combinations fail.
+
+For explicit-profile issuance from a generic authority, after creating the root:
+
+```sh
+make int-generic CN="Generic Issuing CA"
+make generic CN="Signing Key" PROFILE=code_sign KEY_ALG=Ed25519 DAYS=730
+make generic CN="app.example.test" PROFILE=server_ec KEY_ALG=EC SAN_DNS=app.example.test
+```
+
+The direct script is `CN="Signing Key" PROFILE=code_sign bin/gen-generic.sh`.
+CN and PROFILE or EXT_SECTION are required; EXT_SECTION takes precedence.
+The default authority is intm-generic-ca and the default lifetime is 397 days.
+INT_DIR can select another authority recorded as generic. Normal key, DN, SAN and
+lifetime controls apply; no CN-based SAN is added implicitly. The selected profile
+defines the certificate usage. This command rejects specialized authorities even
+when the requested profile would otherwise match them.
+
+The authority's recorded category also restricts issuance: `web` → `serverAuth`,
+`auth` → `clientAuth`, `code` → `codeSigning`, `smime` → `emailProtection`.
+`archive` allows timestamping or the seal profiles without EKU. Checks use compiled
+extensions, including custom profiles; PROFILE, EXT_SECTION and routing flags
+cannot disable them. For a new intentionally multipurpose authority, explicitly use
+`make intermediate KIND=generic INT_DIR=pki-data/general CN="General Issuing CA"`.
+Environment overrides cannot reclassify an existing authority. Old custom paths
+without recorded KIND require offline review/restoration; canonical names remain
+recognized. These rules cover toolkit issuance and built-in reissuance. They do not
+change existing certificates or constrain direct private-key use outside Certnify.
+See [issuance categories](specifications/04-cryptography-and-profiles.md#authority-issuance-categories).
 
 | Input | Meaning/default |
 | --- | --- |
@@ -183,6 +212,15 @@ issuer CRL when applicable. Missing, stale or invalid required CRLs fail.
 
 Preflight errors fail in every mode. In info mode, read `VERIFY STATUS`; exit zero
 is not proof of validity. Default verification does not check revocation.
+
+The `VERIFY CHECKS` report lists requested checks: chain, revocation, identity type
+and purpose. `not-requested` means the check was not requested, not that it passed.
+`VERIFY STATUS: OK` applies only to requested checks; incomplete successful
+verification explicitly says so. `VERIFY_PURPOSE=any` does not require a specific
+purpose. `CN` selects the certificate and `KIND` the authority; neither supplies
+an expected identity or purpose, which must come from the application's needs.
+Existing commands and exit codes remain unchanged.
+
 
 For automation, `VERIFY_MODE=strict` requires one expected identity (SAN or explicit subject) and a
 specific purpose, enforces strict X.509 validation and full-chain CRL coverage,

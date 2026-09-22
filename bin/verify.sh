@@ -217,6 +217,13 @@ info "Extensions (from X509v3 extensions)"
 if ! "$OPENSSL" x509 -noout -text -in "$FILE" | awk 'BEGIN{p=0}/X509v3 extensions:/{p=1}p{print}'; then status=ERROR; fi
 info "VERIFY STATUS: $status"
 info "Backend exit status: $rc"
+# Report requested coverage, not individual successes: verification can stop early.
+revocation_scope=not-requested
+[[ "$VERIFY_CRL" == 0 ]] || revocation_scope=full-chain-crl
+info "VERIFY CHECKS: chain=required revocation=$revocation_scope identity=${identity_type:-not-requested} purpose=${VERIFY_PURPOSE:-not-requested}"
+if [[ "$status" == OK ]] && { [[ "$VERIFY_CRL" == 0 || "$identity_count" == 0 || -z "${VERIFY_PURPOSE:-}" || "${VERIFY_PURPOSE:-}" == any ]]; }; then
+  info "Verification succeeded for requested checks only; application acceptance requires revocation, expected identity and a specific purpose (VERIFY_MODE=strict)."
+fi
 case "$VERIFY_MODE" in
   normal|strict) [[ "$status" == OK ]] ;;
   tolerate_revoked) [[ "$status" == OK || "$status" == REVOKED ]] ;;

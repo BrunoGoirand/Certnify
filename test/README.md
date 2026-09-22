@@ -139,3 +139,18 @@ Smoke also passed before the last admission/review refinements; those refinement
 were checked with targeted tests. See the
 [durability evidence](../specifications/10-acceptance-and-traceability.md#durability-validation-2026-09-21)
 for the precise incremental-validation and hardware/platform limits.
+
+## Authority issuance categories
+
+`make test-stage12` covers category-specific success and rejection, direct and
+wrapper calls, caller overrides, missing/multiple/any EKUs, numeric OID aliases,
+custom profiles, custom paths and aliases, malformed metadata, legacy canonical
+metadata, explicit generic authorities, reclassification refusal, preserving batch
+preflight and post-signing mismatch fencing. All PKIs and injected backend failures
+are disposable fixtures. Stages 5, 7 and 8 use the matching authority for code and
+S/MIME fixtures; cross-category rejection is tested explicitly in stage 12.
+
+Two additional stage-12 methods cover make int-generic/make generic and the direct
+gen-generic wrapper: explicit profiles, EXT_SECTION precedence, Ed25519, explicit
+SANs, custom authority paths, no implicit SAN, required inputs, invalid/CA profiles
+and refusal to use a specialized authority. Refusal tests compare workspace state.

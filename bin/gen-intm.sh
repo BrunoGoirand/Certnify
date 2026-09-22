@@ -196,6 +196,22 @@ cd "$ROOT_DIR"
 acquire_lock "root-ca"
 int_lock_name="$(printf '%s' "$INT_DIR" | tr '/ ' '__')"
 acquire_lock root-ca
+# Preserve an existing authority category across reuse/rekey. Never allow an
+# environment override to reclassify an existing signing key.
+if [[ -s "$INT_DIR/certs/ca.cert.pem" || -s "$INT_DIR/private/ca.key.pem" || -f "$INT_DIR/ca.meta" ]]; then
+  recorded_kind="$(authority_issuance_kind "$INT_DIR")"
+  [[ -z "$KIND" || "$KIND" == "$recorded_kind" ]] \
+    || die "Cannot change issuance category of $INT_DIR from $recorded_kind to $KIND"
+  KIND="$recorded_kind"
+else
+  KIND="${KIND:-generic}"
+  case "$KIND" in web|auth|code|smime|archive|generic) ;;
+    *) die "Unsupported issuance category: $KIND" ;;
+  esac
+  directory_kind="$(kind_from_int_dir "$INT_DIR")"
+  [[ -z "$directory_kind" || "$directory_kind" == "$KIND" ]] \
+    || die "Issuance category $KIND conflicts with authority directory $INT_DIR"
+fi
 open_authority_state root
 check_config root
 check_next_serial root

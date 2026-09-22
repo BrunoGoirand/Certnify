@@ -145,8 +145,12 @@ if [[ -n "$ACTION" ]]; then
       : "${EXT_SECTION:=archive}"
       : "${DAYS:=3600}"
       ;;
+    generic)
+      [[ "$EXT_SECTION_USER_SET" == 1 ]] || die "Generic issuance requires PROFILE or EXT_SECTION"
+      : "${DAYS:=397}"
+      ;;
     *)
-      die "Action inconnue: '$ACTION' (attendu: server|user|dev|email|doc)"
+      die "Action inconnue: '$ACTION' (attendu: server|user|dev|email|doc|generic)"
       ;;
   esac
 
@@ -244,7 +248,7 @@ MIGRATION_CA_ARGS=()
 if [[ -n "${CERTNIFY_MIGRATION_SOURCE:-}" ]]; then
   source "$ROOT_DIR/bin/pki-migration.sh"
   migration_load "$CERTNIFY_MIGRATION_SOURCE" "${SERIAL:?}" "$CN" "${EXPIRES:?}"
-  migration_preflight
+  migration_preflight "$INT_DIR"
   MIGRATION_CA_ARGS=(-preserveDN)
 fi
 
@@ -279,6 +283,7 @@ else
   check_key_generation_policy "$KEY_ALG" "$KEY_SIZE" "$KEY_CURVE"
 fi
 select_leaf_policy "$effective_alg"
+issuance_category_preflight
 claim_leaf_name check
 
 # ---- Build a transient req config with DN and SAN ----
@@ -559,6 +564,9 @@ else
     -in "$CSR_PATH" \
     -out "$TMPCRT"
 fi
+
+# Verify the signed result as well; a mismatch retains the recovery fence.
+assert_certificate_issuance_kind "$TMPCRT" "$INT_DIR"
 
 # ---- Read actual serial and fix INTERMEDIATE index.txt filename=unknown ----
 SERIAL_HEX_ACTUAL="$("$OPENSSL" x509 -in "$TMPCRT" -noout -serial 2>/dev/null | sed 's/^serial=//I' || true)"

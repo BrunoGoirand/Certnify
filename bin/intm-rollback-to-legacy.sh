@@ -19,6 +19,12 @@ if [[ -z "${KIND:-}" ]]; then KIND="$(basename "$LEGACY_DIR" | sed -n 's/^intm-\
 ACTIVE_DIR="$(resolve_authority "intm-${KIND}-ca")"
 [[ "$ACTIVE_DIR" == "intm-${KIND}-ca" && "$LEGACY_DIR" != "$ACTIVE_DIR" && ! -L "$ACTIVE_DIR" ]] || die "Invalid rollback directory roles"
 check_config "$LEGACY_DIR"
+[[ "$(authority_issuance_kind "$LEGACY_DIR")" == "$KIND" ]] \
+  || die "Rollback cannot change issuance category: $LEGACY_DIR -> $ACTIVE_DIR"
+if [[ -e "$ACTIVE_DIR" ]]; then
+  [[ "$(authority_issuance_kind "$ACTIVE_DIR")" == "$KIND" ]] \
+    || die "Rollback target has an inconsistent issuance category: $ACTIVE_DIR"
+fi
 check_pair "$LEGACY_DIR/certs/ca.cert.pem" "$LEGACY_DIR/private/ca.key.pem"
 "$OPENSSL" verify -no_check_time -CAfile root/certs/ca.cert.pem "$LEGACY_DIR/certs/ca.cert.pem" >/dev/null
 archive_generation "$LEGACY_DIR"

@@ -6,6 +6,7 @@ README.md
 README-fr.md
 bin/gen-archive.sh
 bin/gen-code.sh
+bin/gen-generic.sh
 bin/gen-email.sh
 bin/gen-intm.sh
 bin/gen-leaf.sh
@@ -39,6 +40,7 @@ test/README.md
 test/source-manifest.txt
 test/workspace.py
 test/stage0.py
+test/stage12.py
 test/smoke.sh
 image/Certnify.png
 bin/pki-records.awk

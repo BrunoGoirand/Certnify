@@ -1,3 +1,32 @@
+> Complément du 22 septembre 2026 — émission générique : `make int-generic`
+> crée l’autorité et `make generic` / `bin/gen-generic.sh` émettent avec un profil
+> explicite obligatoire. La commande exige une autorité `generic`, conserve les
+> contrôles communs et n’ajoute aucun SAN implicite. Deux nouveaux tests ciblés
+> de la suite 12 réussissent sur PKI temporaires sous OpenSSL 3.6.4 ; aide Make,
+> syntaxe, manifeste et diff vérifiés. Aucune PKI réelle modifiée ; campagne
+> complète et smoke non relancés pour cet ajout.
+
+> Complément du 22 septembre 2026 — contraintes d’émission : la catégorie de
+> l’autorité contrôle désormais les usages des profils compilés et des certificats
+> signés, y compris les réémissions intégrées. Les changements de catégorie par
+> renouvellement, rollover ou rollback sont refusés. `generic` reste polyvalent ;
+> les profils de sceau sans EKU et l’utilisation directe des clés hors Certnify
+> ne constituent pas des domaines de confiance isolés. Aucun certificat de CA
+> existant n’a été modifié. Validation : **29 tests distincts réussis**, par suites
+> et relances ciblées, sur PKI temporaires sous OpenSSL 3.6.4. Syntaxe Bash/Python,
+> manifeste, cibles des liens relatifs et diff vérifiés. Le smoke et la campagne
+> complète n’ont pas été relancés ; aucune PKI réelle n’a été modifiée. Voir la
+> [validation des contraintes d’émission](specifications/10-acceptance-and-traceability.md#issuance-category-validation-2026-09-22).
+
+> Complément du 22 septembre 2026 — portée de la vérification : `VERIFY CHECKS`
+> indique les contrôles demandés ; un résultat `OK` incomplet rappelle explicitement
+> sa portée. Les valeurs par défaut et codes de sortie sont conservés. Les contrôles
+> applicatifs restent disponibles individuellement ou imposés par le mode strict.
+> Validation actuelle : trois tests ciblés de la suite 8 réussis sur PKI temporaires
+> (identités DNS/IP/courriel/URI/sujet, usage, CRL, révocation, date de référence),
+> sous OpenSSL 3.6.4 ; syntaxe Bash et contrôle du diff réussis. La suite complète
+> et le smoke n’ont pas été relancés ; aucune PKI réelle n’a été modifiée.
+
 > Complément du 21 septembre 2026 — résistance aux coupures : le protocole logiciel
 > est implémenté. Un marqueur durable précède les modifications ; les barrières de
 > persistance couvrent l’état local, y compris les index et compteurs OpenSSL.
@@ -78,8 +107,8 @@ Même dans son périmètre, certains cas restent non couverts :
 Au-delà des bogues, plusieurs limites de sécurité doivent être prises en compte :
 
 - Les clés privées non chiffrées reposent entièrement sur la protection du poste et du système de fichiers.
-- La vérification par défaut contrôle la chaîne, sans imposer révocation, identité attendue et usage. Ces contrôles doivent être explicitement exigés selon l’application. [Référence OpenSSL](https://docs.openssl.org/3.3/man1/openssl-verification-options/)
-- Les catégories `web`, `code`, etc. ne constituent pas un cloisonnement cryptographique : prévoir des contraintes d’émission si cette séparation est recherchée.
+- La vérification par défaut conserve un contrôle de chaîne sans imposer de paramètres supplémentaires. Le rapport `VERIFY CHECKS` explicite les contrôles demandés et un succès incomplet rappelle sa portée limitée. Révocation, identité attendue et usage sont disponibles explicitement ; `VERIFY_MODE=strict` les rend obligatoires. L’identité et l’usage doivent être fournis selon le besoin réel de l’application, sans être déduits du certificat présenté. [Référence OpenSSL](https://docs.openssl.org/3.3/man1/openssl-verification-options/)
+- Les catégories `web`, `auth`, `code`, `smime` et `archive` imposent désormais des contraintes d’émission dans Certnify, contrôlées sur les extensions compilées et lors des réémissions intégrées. `generic` reste volontairement polyvalent ; les sceaux `archive` sans EKU ne garantissent pas une séparation des usages côté client. Les certificats de CA restent sans contraintes d’usage propres à la catégorie : l’emploi direct des clés hors de l’outil n’est pas cloisonné, et aucun certificat existant n’est modifié. Voir le chapitre 04.
 - Toute écriture de l’état PKI doit passer par le toolkit : les écritures externes sont interdites par le contrat d’exploitation (spécifications, chapitre 01). Leur exclusion exige un cloisonnement des accès système ; le verrouillage actuel ne l’impose pas à un processus disposant des mêmes droits. Le protocole logiciel de résistance aux coupures est implémenté : marqueur durable avant modification, barrières de persistance et reprise limitée aux plans durablement préparés. Une interruption incertaine bloque les nouvelles opérations. Il ne fournit ni réparation automatique des index OpenSSL, ni protection contre une altération volontaire ; les coupures matérielles réelles restent à qualifier (chapitre 08).
 
 L’implémentation possède néanmoins de bonnes protections : contrôle des clés, validation des entrées, verrouillage commun, conservation des émetteurs historiques et blocage après émission incertaine.

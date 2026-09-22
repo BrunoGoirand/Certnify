@@ -154,6 +154,10 @@ class Operations(unittest.TestCase):
     def test_application_identity_purpose_and_strict_crls(self):
         self.make('server', 'CN=app.example', 'SAN_DNS=app.example', 'SAN_IP=127.0.0.1')
         common = ('verify', 'KIND=web', 'CN=app.example')
+        default = self.make(*common).stdout
+        self.assertIn('VERIFY STATUS: OK', default)
+        self.assertIn('VERIFY CHECKS: chain=required revocation=not-requested identity=not-requested purpose=not-requested', default)
+        self.assertIn('Verification succeeded for requested checks only', default)
         self.make(*common, 'VERIFY_DNS=app.example', 'VERIFY_PURPOSE=sslserver')
         self.make(*common, 'VERIFY_IP=127.0.0.1', 'VERIFY_PURPOSE=sslserver')
         self.make(*common, 'VERIFY_DNS=wrong.example', success=False)
@@ -164,9 +168,20 @@ class Operations(unittest.TestCase):
         strict = common + ('VERIFY_MODE=strict', 'VERIFY_DNS=app.example', 'VERIFY_PURPOSE=sslserver')
         self.make(*strict, success=False)  # Missing root CRL, even with default VERIFY_CRL=0.
         self.make('crl-all', 'CRL_HISTORY=1')
-        self.assertIn('VERIFY STATUS: OK', self.make(*strict, 'VERIFY_CRL=0').stdout)
+        checked = self.make(*strict, 'VERIFY_CRL=0').stdout
+        self.assertIn('VERIFY STATUS: OK', checked)
+        self.assertIn('VERIFY CHECKS: chain=required revocation=full-chain-crl identity=DNS purpose=sslserver', checked)
+        self.assertNotIn('Verification succeeded for requested checks only', checked)
+        unrestricted = self.make(*common, 'VERIFY_CRL=1', 'VERIFY_DNS=app.example', 'VERIFY_PURPOSE=any').stdout
+        self.assertIn('purpose=any', unrestricted)
+        self.assertIn('Verification succeeded for requested checks only', unrestricted)
         self.make('revoke', 'KIND=web', 'CN=app.example')
-        self.make(*strict, success=False)
+        revoked = self.make(*strict, success=False).stdout
+        self.assertIn('VERIFY STATUS: REVOKED', revoked)
+        self.assertNotIn('Verification succeeded for requested checks only', revoked)
+        unchecked = self.make('verify', 'KIND=web', 'FILE=certs/app.example.cert.pem').stdout
+        self.assertIn('VERIFY STATUS: OK', unchecked)
+        self.assertIn('revocation=not-requested', unchecked)
 
     def test_email_identity_and_strict_rejects_cn_fallback(self):
         self.make('int-smime', 'CN=Mail CA')
@@ -174,16 +189,19 @@ class Operations(unittest.TestCase):
         common = ('verify', 'KIND=smime', 'CN=user@example.test', 'VERIFY_PURPOSE=smimesign')
         self.make(*common, 'VERIFY_EMAIL=user@example.test')
         self.make(*common, 'VERIFY_EMAIL=other@example.test', success=False)
+        self.make('int-code', 'CN=Code CA')
         # Custom policy without a SAN is still checked by purpose and strict SAN admission.
-        self.run_cmd(['bin/gen-leaf.sh'], KIND='web', CN='cn-only.example', ACTION='dev')
-        result = self.make('verify', 'KIND=web', 'CN=cn-only.example', 'VERIFY_MODE=strict',
+        self.run_cmd(['bin/gen-leaf.sh'], KIND='code', CN='cn-only.example', ACTION='dev')
+        result = self.make('verify', 'KIND=code', 'CN=cn-only.example', 'VERIFY_MODE=strict',
                            'VERIFY_DNS=cn-only.example', 'VERIFY_PURPOSE=sslserver', success=False)
         self.assertIn('requires a DNS SAN', result.stderr)
 
     def test_uri_subject_and_reference_time(self):
-        self.run_cmd(['bin/gen-leaf.sh'], KIND='web', CN='uri-only', ACTION='dev',
+        self.make('int-code', 'CN=Code CA')
+        self.ca = self.work / 'intm-code-ca'
+        self.run_cmd(['bin/gen-leaf.sh'], KIND='code', CN='uri-only', ACTION='dev',
                      SAN_URI='spiffe://example/service')
-        common = ('verify', 'KIND=web', 'CN=uri-only')
+        common = ('verify', 'KIND=code', 'CN=uri-only')
         self.make(*common, 'VERIFY_URI=spiffe://example/service')
         self.make(*common, 'VERIFY_URI=spiffe://example/other', success=False)
         self.make(*common, 'VERIFY_URI=spiffe://example/serv', success=False)
@@ -208,11 +226,11 @@ class Operations(unittest.TestCase):
         # Current CRLs cannot cover a time before their lastUpdate.
         self.make(*strict, 'VERIFY_URI=spiffe://example/service',
                   'VERIFY_ATTIME=946684800', success=False)
-        self.run_cmd(['bin/gen-leaf.sh'], KIND='web', CN='subject-only', ACTION='dev')
+        self.run_cmd(['bin/gen-leaf.sh'], KIND='code', CN='subject-only', ACTION='dev')
         cert = self.ca / 'certs/subject-only.cert.pem'
         subject = self.run_cmd([self.backend, 'x509', '-in', str(cert), '-noout',
                                 '-subject', '-nameopt', 'RFC2253']).stdout.strip().partition('subject=')[2]
-        self.make('verify', 'KIND=web', 'CN=subject-only', 'VERIFY_MODE=strict',
+        self.make('verify', 'KIND=code', 'CN=subject-only', 'VERIFY_MODE=strict',
                   'VERIFY_PURPOSE=codesign', 'VERIFY_SUBJECT=' + subject)
 
     def test_batch_user_without_email_and_cn_only_warning(self):
