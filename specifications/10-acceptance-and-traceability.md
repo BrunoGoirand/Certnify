@@ -2,10 +2,22 @@
 
 Acceptance compares decoded fields and trust/revocation outcomes, not PEM bytes.
 Use disposable source-only workspaces and newly generated keys. Capture current
-time around issuance for lifetime checks. Python is test-only, not a runtime PKI
-dependency. See [test/README.md](../test/README.md) for execution and packaging.
+time around issuance for lifetime checks. Python 3.8+ is also a runtime dependency
+of the durability helper. See [test/README.md](../test/README.md) for execution and packaging.
 
 ## Executable gates
+
+The exclusive-writer requirement in chapter 01 also needs deployment acceptance:
+verify that non-toolkit accounts cannot write operational state, that no sync or
+restore agent writes the live workspace, and that publication hooks only export
+artifacts. These checks do not establish protection against privileged users or
+arbitrary processes running as the toolkit account. They are deployment criteria,
+not claims that the existing regression suites enforce OS isolation.
+
+The implemented durability protocol in chapter 08 has a dedicated stage-11 gate
+for persistence ordering, barrier failures and interrupted-command admission.
+Actual power-cut behavior requires separate qualification on each storage stack;
+process termination and mocked barriers do not satisfy that qualification.
 
 | Command | Scenarios | Primary coverage |
 | --- | ---: | --- |
@@ -17,7 +29,10 @@ dependency. See [test/README.md](../test/README.md) for execution and packaging.
 | make test-stage5 | 8 | Effective key/profile matrix, SANs, names, configuration completeness |
 | make test-stage6 | 15 | Interrupted commits, killed issuer, preserved replacements, publication resume |
 | make test-stage7 | 13 | Audit A01–A06, state loss, Make transport, key strength, SAN equality and UTF-8 |
-| make test-stage8 | 13 | Controlled cleanup, chain lifetime admission, identity/purpose/strict verification, CN-only batch and historical CRLs |
+| make test-stage8 | 14 | Controlled cleanup, chain lifetime admission, DNS/IP/email/URI/subject and reference-time verification, CN-only batch and historical CRLs |
+| make test-stage9 | 5 | Preserving batch migration, fresh key parameters, source/profile admission and explicit compatibility mode |
+| make test-stage10 | 11 | Hold release, verified installation recovery and workspace relocation |
+| make test-stage11 | 13 | Persistence ordering/errors, excluded-path admission, durable checkpoints, backend kill and safe resumption |
 | make test-smoke | Integration workflow | Kinds, profiles, SANs, issuance, revocation, rekey and CLI examples |
 
 The stage-numbered command names are stable test-suite identifiers, not an active
@@ -55,7 +70,7 @@ This records test scope, not a guarantee for untested systems or every failure p
 | A24 | Required | Final CRL rejects unexpired V rows unless overridden; CRL_HOURS takes priority; PEM/DER represent same CRL; latest links point to versioned outputs |
 | A25 | Required | Publication failure is per-artifact and recoverable; digest sidecars follow the declared stable encoding; no false remote-publication success |
 | A26 | Required | Two concurrent issuers never duplicate serials; issuance/revocation/CRL/rollover share coherent locking |
-| A27 | Required | Representative failures at commit boundaries: previous keys/history preserved; committed serial never reused; restart reports partial artifacts and requires explicit reconciliation |
+| A27 | Required | Representative failures at commit boundaries: previous keys/history preserved; committed serial never reused; restart reports partial artifacts and requires verified plan resumption or explicit reconciliation |
 | A28 | Required | CN regex metacharacters, slashes, quotes, Unicode, and SAN/TSV shell metacharacters remain data and cannot escape storage or execute code |
 | A29 | Required | Symlink/path alias/nested/absolute directory inputs resolve consistently and cannot bypass containment or locking |
 | A30 | Required | Empty revocation TSV field and high/leading-zero serials parse correctly; counter repair chooses max+1 without truncation |
@@ -63,6 +78,9 @@ This records test scope, not a guarantee for untested systems or every failure p
 | A32 | Required | All dry-run operations leave keys, indexes, counters, markers, directories, and CRLs unchanged |
 | A33 | Required | Import both normal and rollover layouts, archived issuer generations, stale configuration paths, and missing-artifact reports without resetting history |
 | A34 | Required | Packaging from a clean checkout includes the root profile and excludes all sensitive generated authority data |
+| A35 | Required | Release only certificateHold on a leaf/intermediate; retain permanent revocations, expired status, unrelated disable flags and archived CRLs; publish matching current PEM/DER and reject stale final-CRL replay |
+| A36 | Required | Resume sealed installation after index/key/certificate interruption without signing or advancing counters; refuse changed/missing sources, key-alias target drift, expired validity and unsealed plans |
+| A37 | Required | Preview/apply offline workspace rebinding, including nested/historical authorities and internal absolute aliases; preserve state, reject unsafe configs, resume partial config/alias installation |
 
 ## Evidence limits
 
@@ -70,13 +88,15 @@ A01–A14 are covered by root/bootstrap, key/profile tests and smoke; this is no
 exhaustive backend/extension matrix. A15–A18 and A31–A32 use actual chains, both
 required CRLs, revocation, malformed inputs and workspace snapshots. A19–A20 and
 A26 use real directory transitions, historical issuers and concurrent toolkit
-processes. A21–A23 cover strict inventories, lossy CN-only mode and partial batches.
+processes. A21–A23 cover strict inventories, preserving migration, explicit lossy CN-only
+mode and partial batches. Stage 9 additionally checks source evidence, full subject
+DER, extension equality, key parameters, dry-run snapshots and retry receipts.
 A24–A25 use a local publisher stub, exact digest bytes and interrupted alias/DER
 publication. A27 injects representative backend/install/move/post-check failures
 and SIGKILL; it is not exhaustive instruction-level crash or power-loss testing.
 A28–A30 exercise input metacharacters, containment and exact serial boundaries.
 A33 rejects stale bindings/missing history and imports supported older layouts;
-it does not qualify arbitrary automatic relocation. A34 checks source packaging,
+stage 10 additionally exercises explicit offline whole-workspace rebinding and interrupted-plan resumption. This does not qualify live migration or arbitrary crash repair. A34 checks source packaging,
 not historical secret disclosure. No operational CA or actual remote publisher is
 used by these tests.
 
@@ -99,7 +119,8 @@ used by these tests.
 | bin/intm-rollover.sh | 07 generation preservation and common layout |
 | bin/intm-rollback-to-legacy.sh | 07 restore and backup behavior |
 | bin/list-leafs-by-issuer.sh | 03 TSV; 07 selection/export |
-| bin/intm-reissue-leafs.sh | 07 environment-based dispatch, receipts and aggregate outcomes |
+| bin/intm-reissue-leafs.sh | 07 source preflight, environment-based dispatch, receipts and aggregate outcomes |
+| bin/pki-migration.sh | 07 source binding/profile/key admission, preserving CSR and subject/extension comparison |
 | bin/intm-publish-final-crl.sh | 07 final CRL formats, guards, command publication |
 | profiles/root/base.cnf | 04 complete root and root-side intermediate policy |
 | profiles/intermediate/base.cnf | 04 intermediate constraints |
@@ -153,3 +174,82 @@ defaults through both Make aliases, direct issuance and batch issuance. Explicit
 excessive validity still fails before authority mutation. Bash syntax and
 `git diff --check` passed. The complete suites and smoke were not rerun; actual
 remote publication, power loss and other platforms remain unqualified.
+
+## Preserving migration validation (2026-09-21)
+
+40 distinct scenarios passed on local macOS with OpenSSL 3.6.4, using generated,
+source-only temporary PKIs:
+
+- Complete stage 0, 1, 3 and 5 suites: 29 scenarios.
+- All five stage-9 migration scenarios: complete UTF-8 subjects and mixed SANs,
+  RSA/EC/Ed25519/Ed448 key parameters and fresh keys, S/MIME variants, custom
+  profiles, extended subjects, critical/absent SANs, dry-run immutability,
+  retries, missing evidence, changed profiles and backend decoding failure.
+- Stage 4: `test_dry_runs_leave_no_lock_or_state`.
+- Stage 7: `test_profile_san_conflicts_fail_before_signing`,
+  `test_empty_request_and_profile_only_sans`,
+  `test_post_sign_san_mismatch_is_not_installed`.
+- Stage 8: `test_batch_user_without_email_and_cn_only_warning`,
+  `test_archive_defaults_fit_issuer_and_explicit_duration_is_not_capped`.
+
+Bash/Python syntax and `git diff --check` also passed. No operational certificates
+were migrated. This is targeted qualification, not a complete all-suite/smoke
+rerun, a new exhaustive PKI audit, or qualification of other OpenSSL versions.
+
+## Maintenance validation (2026-09-21)
+
+The hold-release, verified-installation recovery and offline workspace-rebinding
+changes passed **101 distinct test methods across stages 0–10**, with targeted
+reruns after adjustments. Counts by suite: 4, 9, 6, 8, 9, 8, 15, 13, 13, 5 and 11.
+The final targeted reruns cover recovery key-alias contents, repeated interruption
+of config/directory-alias rebinding, nested and legacy authorities, CRL archive
+preservation and stale replay refusal after release, dry-run suppression of auto
+recovery, and refusal to resume uncertain backend outcomes.
+
+Stage 10 uses real OpenSSL-generated disposable PKIs. It verifies leaf/intermediate
+hold release, expired status, permanent-revocation refusal, independent disable
+markers, historical CRLs, matching current PEM/DER, and read-only previews. Fault
+injection interrupts after index commit and between key/certificate or config/alias
+installation. Recovery preserves serial/CRL counters, rejects changed evidence,
+corrupt/unsealed plans and expired artifacts, and never signs again. Relocation
+checks unchanged keys/history/counters, spaces in the new path, nested/legacy
+CA configurations, absolute file/directory aliases and operations after rebinding.
+
+Executed environment: macOS, Bash 3.2.57, OpenSSL 3.6.4 and Python 3.14.7.
+All Bash scripts passed syntax checks; Python test files passed parsing. The source
+manifest, relative documentation links and `git diff --check` passed. Smoke was
+not rerun. This is local regression evidence, not qualification of power loss,
+network filesystems, other OpenSSL/platform versions, live migration, arbitrary
+crash repair or a production PKI. Private completion journals retain staged
+artifacts and are deliberately excluded from source packages and cleanup targets.
+
+## Durability validation (2026-09-21)
+
+The durable fence, checked persistence barriers and checkpoint admission are
+implemented, rather than a proposed extension. `make test-stage11` passed all
+**13 methods** on macOS with Python 3.14.7 and OpenSSL 3.6.4. Coverage includes
+intent before backend execution, data before fence retirement, file/directory
+barriers, macOS full-flush refusal without fallback, error latching, repeatable
+manual review after a barrier error, retirement failure, special-file refusal,
+and rejection of operational paths inside persistence exclusions.
+
+Disposable integration fixtures also exercise a killed backend with a deliberately
+truncated index and no issuance journal, a killed sealed leaf installation,
+explicit and automatic recovery without duplicate signing, a second interruption
+during resumption of an orderly failure, and failures of the initial/final barriers. A fence cannot be bypassed through an inherited ownership
+variable. The ordinary/legacy journal acknowledgment path is separately retested
+through stage 6 after adding durable review intent.
+
+These are software protocol and local syscall tests. They do not emulate hardware
+write caches or establish real power-cut durability. No live PKI was modified;
+Linux, network/synced storage, hardware power cycling, media failure and remote
+publisher durability remain unqualified. Source packaging, Python/Bash syntax,
+relative documentation links and `git diff --check` were also checked.
+
+The complete stages 0–10 and all 13 stage-11 methods passed: **115 distinct test
+methods**, with targeted reruns after the final path-admission, acknowledgment and
+repeat-resume adjustments. `make test-smoke` also passed. Smoke ran before those
+last admission/review refinements; the corresponding targeted tests passed after
+them. This is incremental regression evidence, not a claim that every suite was
+rerun against one final frozen revision. The final syntax, source-manifest/local
+link and diff checks passed. No hardware power loss or Linux execution was tested.

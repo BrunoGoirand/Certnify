@@ -146,7 +146,7 @@ class Records(unittest.TestCase):
         exported = (workspace / 'batch.tsv').read_text()
         self.assertIn('Élodie / A,B', exported)
         r = subprocess.run(['bash', 'bin/intm-reissue-leafs.sh'], cwd=workspace,
-                           env=dict(self.env, KIND='web', INPUT='batch.tsv', DRY_RUN='1'),
+                           env=dict(self.env, KIND='web', INPUT='batch.tsv', DRY_RUN='1', REISSUE_MODE='cn-only'),
                            capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn('Élodie / A,B', r.stdout)

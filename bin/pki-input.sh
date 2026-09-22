@@ -26,7 +26,7 @@ validate_public_inputs() {
     case "$value" in ''|0|1) ;; *) die "$name must be 0 or 1" ;; esac
   done
   case "${FORCE_NEW_KEY:-}" in ''|0|1|rotate) ;; *) die "FORCE_NEW_KEY must be 0, 1 or rotate" ;; esac
-  for name in CLEAN_APPLY CRL_HISTORY; do
+  for name in CLEAN_APPLY CRL_HISTORY AUTO_RECOVER RELOCATE_APPLY; do
     value="${!name-}"
     case "$value" in ''|0|1) ;; *) die "$name must be 0 or 1" ;; esac
   done

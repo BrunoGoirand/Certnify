@@ -12,6 +12,7 @@
 #   make revoke INT_DIR="intm-web-ca" CN="app.example.com" REASON="cessationOfOperation"
 #   make revoke KIND=web FILE="intm-web-ca/certs/app.example.com.cert.pem" REASON="superseded"
 #   make revoke INT_DIR="intm-web-ca" SERIAL="1002" REASON="superseded"
+#   make revoke KIND=web SERIAL=1002 REASON=removeFromCRL CRL_UPDATE=1
 #
 # Env:
 #   INT_DIR/KIND, CN/FILE/SERIAL (priority FILE > SERIAL > CN), REASON, MAP_PRIV_WITHDRAWN_TO,
@@ -136,6 +137,11 @@ fi
 
 # Validate containment without replacing the destination by its symlink target.
 authority_path "$CA_DIR" "$CRL_TARGET" >/dev/null
+
+if [[ "$REASON" == removeFromCRL ]]; then
+  release_certificate_hold "$CA_DIR" "$TARGET" "$ISSUER_CERT" "$ISSUER_KEY" "$CRL_TARGET"
+  exit 0
+fi
 
 if [[ "$DRY_RUN" == 1 ]]; then
   info "PLAN serial=$SERIAL_HEX current=$before_status revoke=$([[ "$before_status" == R ]] && echo no || echo yes) crl_refresh=$CRL_UPDATE issuer=$ISSUER_ID"

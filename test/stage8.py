@@ -127,7 +127,7 @@ class Operations(unittest.TestCase):
             self.make(target, 'CN=' + target)
         self.run_cmd(['bash', 'bin/gen-leaf.sh'], ACTION='doc', CN='direct-archive')
         (self.work / 'archives.tsv').write_text('1000\t2030-01-01T00:00:00Z\tbatch-archive\tunknown\n')
-        self.make('reissue-leafs-archive', 'INPUT=archives.tsv')
+        self.make('reissue-leafs-archive', 'REISSUE_MODE=cn-only', 'INPUT=archives.tsv')
         ca = self.work / 'intm-archive-ca'
         for name in ['archive', 'doc', 'direct-archive', 'batch-archive']:
             dates = self.run_cmd([self.backend, 'x509', '-in', str(ca / ('certs/' + name + '.cert.pem')),
@@ -180,12 +180,47 @@ class Operations(unittest.TestCase):
                            'VERIFY_DNS=cn-only.example', 'VERIFY_PURPOSE=sslserver', success=False)
         self.assertIn('requires a DNS SAN', result.stderr)
 
+    def test_uri_subject_and_reference_time(self):
+        self.run_cmd(['bin/gen-leaf.sh'], KIND='web', CN='uri-only', ACTION='dev',
+                     SAN_URI='spiffe://example/service')
+        common = ('verify', 'KIND=web', 'CN=uri-only')
+        self.make(*common, 'VERIFY_URI=spiffe://example/service')
+        self.make(*common, 'VERIFY_URI=spiffe://example/other', success=False)
+        self.make(*common, 'VERIFY_URI=spiffe://example/serv', success=False)
+        self.make(*common, 'VERIFY_URI=spiffe://example/service', 'VERIFY_SUBJECT=CN=uri-only', success=False)
+        cert = self.ca / 'certs/uri-only.cert.pem'
+        subject = self.run_cmd([self.backend, 'x509', '-in', str(cert), '-noout',
+                                '-subject', '-nameopt', 'RFC2253']).stdout.strip().partition('subject=')[2]
+        self.make('crl-all', 'CRL_HISTORY=1')
+        strict = common + ('VERIFY_MODE=strict', 'VERIFY_PURPOSE=codesign')
+        self.make(*strict, 'VERIFY_URI=spiffe://example/service')
+        self.make(*strict, 'VERIFY_SUBJECT=' + subject)
+        self.make(*strict, 'VERIFY_SUBJECT=CN=wrong', success=False)
+        now = str(int(datetime.datetime.now(datetime.timezone.utc).timestamp()))
+        self.make(*strict, 'VERIFY_URI=spiffe://example/service', 'VERIFY_ATTIME=' + now)
+        future = str(int(now) + 8 * 86400)
+        self.make(*common, 'VERIFY_ATTIME=' + future)
+        self.make(*strict, 'VERIFY_URI=spiffe://example/service',
+                  'VERIFY_ATTIME=' + future, success=False)
+        self.make(*common, 'VERIFY_ATTIME=946684800', success=False)
+        for invalid in ['-1', '1.5', 'abc', '0001', '9999999999999']:
+            self.make(*common, 'VERIFY_ATTIME=' + invalid, success=False)
+        # Current CRLs cannot cover a time before their lastUpdate.
+        self.make(*strict, 'VERIFY_URI=spiffe://example/service',
+                  'VERIFY_ATTIME=946684800', success=False)
+        self.run_cmd(['bin/gen-leaf.sh'], KIND='web', CN='subject-only', ACTION='dev')
+        cert = self.ca / 'certs/subject-only.cert.pem'
+        subject = self.run_cmd([self.backend, 'x509', '-in', str(cert), '-noout',
+                                '-subject', '-nameopt', 'RFC2253']).stdout.strip().partition('subject=')[2]
+        self.make('verify', 'KIND=web', 'CN=subject-only', 'VERIFY_MODE=strict',
+                  'VERIFY_PURPOSE=codesign', 'VERIFY_SUBJECT=' + subject)
+
     def test_batch_user_without_email_and_cn_only_warning(self):
         self.make('int-auth', 'CN=Users CA')
         inventory = self.work / 'users.tsv'
         inventory.write_text('1000\t2030-01-01T00:00:00Z\tAlice Example\tunknown\n'
                              '1001\t2030-01-01T00:00:00Z\talice@example.test\tunknown\n')
-        result = self.make('reissue-leafs-auth', 'INPUT=users.tsv')
+        result = self.make('reissue-leafs-auth', 'REISSUE_MODE=cn-only', 'INPUT=users.tsv')
         self.assertIn('CN-only', result.stderr)
         self.assertIn('completed=2', result.stdout)
         cert = self.work / 'intm-auth-ca/certs/Alice Example.cert.pem'

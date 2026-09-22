@@ -24,6 +24,12 @@ Every mutating service should accept a resolved authority handle and immutable r
 
 ## Transaction lock
 
+The exclusive-writer operating contract in chapter 01 is mandatory. The lock
+serializes supported toolkit operations; it does not enforce that contract against
+processes with direct write access. Permission checks or change detection alone
+cannot establish exclusive ownership. Deployment isolation must also cover
+publication hooks, synchronization tools and the invoking account.
+
 Every low-level CA transaction, including ordinary readers, uses the physical workspace's
 `.locks/root-ca.lock`. A single coarse lock deliberately serializes authorities,
 root revocation, CRL updates, and directory transitions. Aliases share this lock.
@@ -80,8 +86,8 @@ Only successful completion clears the pending journal. SIGKILL leaves it intact.
 Subsequent locked toolkit commands refuse an unresolved journal before changing
 PKI state. Preflight errors before this boundary do not create a pending journal.
 
-The journal is a recovery aid, not authoritative evidence that a filesystem
-write reached durable storage. A phase may lag a committed operation. A port must
+The diagnostic journal is a recovery aid; only a completed persistence barrier
+establishes the software durability boundary. A phase may lag a committed operation. A port must
 inspect actual database and artifacts, not equate a missing success receipt with
 permission to reissue. Batch issuance also retains its per-item review receipts.
 
@@ -93,17 +99,18 @@ key/certificate/chain/metadata intact until signing and verification of the
 replacement succeed. Old pairs are archived together in a staged generation
 directory. Leaf forced replacement backs up any existing key and stages its key
 and CSR. A complete serial-named key/CSR/certificate/fullchain set is retained.
-Only after chain verification does it enter the canonical-replacement phase and
-replace all four conventional paths, checking the resulting key/certificate pair. Certificate, binding, policy
+Only after chain verification does it seal the installation plan and replace
+all four conventional paths from the same checked key/certificate set. Certificate, binding, policy
 record, metadata and chain replacement use staged single-file renames; latest
 aliases are created under a temporary sibling directory and renamed individually.
 
-There is **no multi-file transaction and no fsync/power-loss guarantee**. Installing
+There is **no atomic multi-file transaction**. The durable fence described below
+blocks further operations after abrupt interruption; it does not undo partial writes. Installing
 an intermediate or forced-replacement leaf key and certificate, publishing a
 chain and metadata, renaming
 rotated leaf artifacts, and moving/rebinding authorities have interruption
-windows. The pending journal blocks automatic retries through those windows and
-archives retain old identities. It does not make mixed intermediate files safe
+windows. The pending journal blocks ordinary retries; complete verified plans
+can be resumed as described below. Archives retain old identities. It does not make mixed intermediate files safe
 for consumers that bypass toolkit locking. Permissions 0400/0444 are ordinary
 read-only permissions, not immutable storage. Failed operations may retain
 private `.key.*`/`.replacement.*` and public temporary files for inspection.
@@ -115,17 +122,118 @@ may fail after revocation; the error says which local change remains committed.
 
 ## Journal representation
 
+### Power-loss resilience: durable fence and verified checkpoints
+
+The software protocol is implemented by `bin/pki-durable.py` and its shell adapter.
+Python 3.8+ is now a runtime dependency. The supported persistence primitives are
+`fsync` on Linux and `fsync` followed by a checked `F_FULLFSYNC` device barrier on
+macOS. No silent fallback or option to disable durability is provided. Hardware
+power-cut qualification remains outstanding; storage must honor these barriers.
+
+Under the workspace lock, each mutating command persists `.recovery/power-loss`
+and its containing directories **before** layout preparation or backend execution.
+This fence covers initialization, OpenSSL index/counter/newcerts updates, normal
+revocation/CRL operations, lifecycle moves, inventory and batch receipts, cleanup
+and relocation. Ordinary verification checks admission without creating a fence.
+Supported unlocked previews and recovery reporting remain read-only.
+
+On an orderly exit, including a reported ordinary command failure, the helper
+synchronizes workspace regular files and directories bottom-up before retiring the
+fence. Existing operation-specific recovery journals still block uncertain signing
+outcomes. Synchronizing a partial result does not repair it or turn failure into
+success. Signal exits retain the fence. A persistence error makes the command fail,
+retains blocking state and prevents new operations; when possible a
+`.recovery/power-loss-error` diagnostic latches the error against an exit-time retry.
+Only a successful exit with `Local state durably synchronized` is a completed
+mutating command acknowledgment; earlier progress messages are not acknowledgments.
+
+The conservative synchronization scope is the physical workspace, excluding `.git`,
+`.locks` and the exact source files listed in the trusted distribution manifest.
+Symlinks are never followed; their parent directories are synchronized. Nested
+mounts and unsupported special files are rejected. Keep operational state separate
+from distribution source files and on one local filesystem. Operational path
+resolution rejects `.git`, `.locks` and exact distribution source paths, including
+aliases resolving into those exclusions. The scan cost grows
+with retained PKI history; this implementation favors a complete persistence
+boundary over per-file write tracking. No files outside the workspace are covered.
+
+Before installing a verified plan, the toolkit persists backend state, source
+copies, guards, manifest and `ready`, then binds the ready-file digest into the
+fence. After an abrupt stop, `resume` requires this durable checkpoint **and** all
+existing semantic/hash/identity checks. A ready file alone is insufficient when
+a power-loss fence remains. Plans created before checkpoint completion, damaged
+artifacts and interrupted backend updates remain blocked for manual review.
+Recovery never signs again, rolls back counters or reconstructs the database.
+When an orderly failure has retired its fence but left a verified plan, resumption
+seals a fresh durable checkpoint before installation. A second interruption during
+that resume can therefore follow the same verified recovery path.
+An interruption after moving the completed journal but before retiring the fence
+may conservatively require manual review; completion receipts must be retained.
+
+Normal CRL retry behavior is preserved after orderly errors. After abrupt loss,
+even a revocation or CRL operation without an issuance journal is blocked by the
+fence. Remote publication starts only after a local persistence barrier; remote
+acknowledgment and retries remain the publisher's responsibility.
+
+`RECOVERY_ACTION=acknowledge` records the explicit review and synchronizes the
+reconciled state before retiring a power-loss fence. This is an administrator
+assertion, not an automatic integrity check. Review records are retained as
+`.recovery/power-loss-reviewed-<ID>`. Stale locks are never stolen.
+
+The target is durable successful local operations, or verified resumption/explicit
+blocking of interrupted operations, assuming exclusive toolkit writes and a
+qualified storage stack. There is no atomic multi-file database transaction, no
+automatic repair of arbitrary OpenSSL damage and no guarantee against destroyed
+media or privileged tampering. Independent backups remain necessary. SIGKILL and
+injected barrier-error tests establish software behavior, not real power-cut
+qualification. Synced folders and network filesystems remain unqualified.
+
+See [Linux fsync(2)](https://man7.org/linux/man-pages/man2/fsync.2.html) and
+[Apple's persistence guidance](https://developer.apple.com/documentation/xcode/reducing-disk-writes).
+
+### Current representation
+
 `.recovery/pending/operation` contains an `id=YYYYMMDDTHHMMSSZ-pid` line and an
 `operation=...` description. `phase` contains the latest `phase=...` line, replaced
 through a sibling temporary file. `events` appends phase/path/expected-serial notes.
-These are diagnostic text, never shell input or a transaction log with durable
-ordering guarantees. An acknowledged directory also contains the operator's
+These are diagnostic text, never shell input or a database transaction log.
+Phase updates are synchronized, but a phase does not prove backend consistency. An acknowledged directory also contains the operator's
 `review` note. Preserve unrecognized diagnostics during import; use actual CA
-artifacts to establish commit state. No private key bytes belong in this journal.
+artifacts to establish commit state. A completed installation plan additionally
+contains `manifest`, `guards`, `files/` and a last-published `ready` marker with
+schema and SHA-256 digests. Files are copied before sealing, with mode 400 under
+private directories. These may include private keys: journals have the same
+confidentiality requirements as authority private storage and must remain excluded
+from Git, packages and public archives. Paths in plans are workspace-relative;
+no journal content is evaluated as shell code.
 
 ## Recovery interface
 
 bin/recovery.sh defaults to a read-only report, including with a stale lock.
+`RECOVERY_ACTION=resume` completes a sealed plan under the workspace lock.
+`AUTO_RECOVER=1` enables the same path before ordinary locked operations; it is
+opt-in and never applies when DRY_RUN=1, including on an ordinary locked reader. Supported plans cover validated leaf
+publication (normal, rotate and forced replacement), hold release and whole-workspace
+configuration rebinding. Cryptographic checks precede sealing; resume checks all
+source hashes, state guards, validity deadlines and destination identities before
+writing. A destination must still equal its recorded before or after state.
+Counter/index guards prevent resuming against intervening issuance or revocation.
+Installation uses staged per-file renames and can itself be interrupted and resumed.
+Completed journals move to `.recovery/completed-<ID>` as private receipts. Internal directory aliases are replaced
+without following their targets; an interruption between unlink and recreation
+is supported by the plan, but alias replacement has a temporary missing state.
+
+Recovery never signs a certificate, regenerates a CRL, resets counters, executes
+saved commands or steals a stale lock. No ready marker, altered/missing artifacts,
+expired validity, uncertain backend outcome, root/intermediate issuance before a
+supported plan, or interrupted lifecycle directory moves still require review.
+Power-loss resumption additionally requires the durable checkpoint above.
+There is no atomic multi-file transaction. Receipt retention is operator-managed,
+not automatically pruned.
+
+`RECOVERY_ACTION=relocate` previews whole-workspace rebinding; `RELOCATE_APPLY=1`
+applies only after full validation and sealing. See chapter 02.
+
 RECOVERY_ACTION=acknowledge requires the exact reported RECOVERY_ID and nonempty
 RECOVERY_NOTE. Under the workspace lock it moves the pending journal to
 `.recovery/reviewed-<ID>`. It does not validate or repair CA state; acknowledgment

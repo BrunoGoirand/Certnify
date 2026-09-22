@@ -23,15 +23,18 @@ de signature documentaire ou de service d’horodatage.
 - Intermédiaires `web`, `auth`, `code`, `smime` et `archive`, et autorités personnalisées.
 - Sélection exacte par CN, protection contre les doublons actifs et conservation des générations d’émetteur.
 - Vérification de chaîne, contrôle CRL strict facultatif, révocation unitaire/en lot et génération de CRL.
-- Rollover/rollback d’intermédiaires, export d’inventaire et réémission en lot explicitement limitée au CN.
+- Rollover/rollback d’intermédiaires, export d’inventaire et réémission en lot conservant l’identité et le profil.
 - Verrou partagé du workspace, signalement des interruptions et publication de CRL reprenable.
 
 L’outil est exploité par un administrateur sur le système de fichiers. Il ne fournit
 ni serveur d’enrôlement, ni ACME, ni renouvellement planifié, ni répondeur OCSP,
 ni installation de confiance, ni interface HSM. Les clés privées sont des fichiers
-non chiffrés aux permissions restrictives. Aucune transaction multifichier,
-réparation automatique après interruption ou durabilité face aux coupures de courant
-n’est garantie.
+non chiffrés aux permissions restrictives. Un marqueur durable et des barrières de
+persistance protègent les opérations locales : après une interruption brutale,
+les nouvelles opérations sont bloquées jusqu’à une reprise vérifiée ou une revue
+explicite. Cela ne fournit ni transaction multifichier atomique ni réparation d’un
+incident arbitraire. Les coupures matérielles réelles restent à qualifier. Voir le
+[guide de reprise](specifications/guides/recovery-fr.md).
 
 ## Prérequis
 
@@ -41,8 +44,12 @@ utilitaires Unix usuels (`awk`, `sed`, `grep`, `mktemp`, `install`, `date`, `od`
 LibreSSL. Choisir un autre exécutable avec `OPENSSL=/chemin/absolu/vers/openssl`.
 
 L’environnement qualifié est macOS, Bash 3.2.57, GNU Make 3.81 et OpenSSL 3.6.4.
-L’acceptation d’autres versions ne constitue pas leur qualification. Les tests
-exigent aussi Python 3.8+ ; l’environnement de test consigné utilise Python 3.14.7.
+L’acceptation d’autres versions ne constitue pas leur qualification. Python 3.8+
+est requis à l’exécution pour les barrières de persistance, ainsi que pour les tests ;
+l’environnement consigné utilise Python 3.14.7. Le composant de persistance prend
+en charge macOS et Linux sur un seul système de fichiers local et refuse les
+barrières non prises en charge. Les écritures externes, notamment celles d’un
+agent de synchronisation sur l’état PKI actif, sont interdites.
 
 ## Démarrage rapide
 
@@ -165,8 +172,17 @@ La recherche par CN exige une correspondance active exacte unique, ou une seule
 correspondance historique non ambiguë. Utiliser FILE en cas d’ambiguïté ; la
 révocation accepte aussi SERIAL. Une valeur CHAIN non vide est refusée. La
 vérification utilise la génération d’émetteur liée au certificat et la racine du
-workspace. Ajouter `VERIFY_DNS`, `VERIFY_IP` ou `VERIFY_EMAIL` pour une identité
+workspace. Ajouter `VERIFY_DNS`, `VERIFY_IP`, `VERIFY_EMAIL`, `VERIFY_URI` ou `VERIFY_SUBJECT` pour une identité
 attendue, et `VERIFY_PURPOSE` pour l’usage applicatif.
+
+`VERIFY_URI` compare exactement le SAN URI (sensible à la casse, sans normalisation).
+`VERIFY_SUBJECT` compare le sujet complet au format RFC2253, tel que produit par
+`openssl x509 -in cert.pem -noout -subject -nameopt RFC2253`, sans `subject=`.
+Cela permet le mode strict sans SAN, sans identifier un certificat de façon unique.
+`VERIFY_ATTIME` fixe la date en secondes Unix positives ou nulles (UTC, jusqu’à 9999).
+La même date s’applique aux certificats et aux CRL : il faut conserver des CRL
+couvrant cette époque. Cela ne reconstitue pas la confiance passée et ne prouve
+pas la date d’une signature. Une identité URI/sujet incorrecte échoue dans tous les modes.
 
 `VERIFY_CRL=1` exige les CRL valides de la racine **et** de l’émetteur, y compris
 la CRL historique appropriée. Une CRL requise absente, périmée ou invalide fait échouer
@@ -183,7 +199,7 @@ Les erreurs préalables échouent dans tous les modes. En mode info, lire
 `VERIFY STATUS` : un code de sortie nul ne prouve pas la validité. Par défaut,
 la vérification ne contrôle pas la révocation.
 
-Pour les automatisations, `VERIFY_MODE=strict` exige une identité SAN attendue et
+Pour les automatisations, `VERIFY_MODE=strict` exige une identité attendue (SAN ou sujet explicite) et
 un usage précis, impose les contrôles X.509 stricts et les CRL de toute la chaîne,
 et échoue pour toute erreur. `VERIFY_CRL=0` ne désactive pas ces contrôles stricts.
 Exemples, après renouvellement des CRL nécessaires :
@@ -218,7 +234,20 @@ enregistrées restent acquises. Les cibles Make de révocation utilisent CRL_UPD
 par défaut ; 0 omet l’actualisation. Répéter la révocation préserve sa date et sa
 raison initiales et permet de retenter l’actualisation de CRL. Les raisons et
 correspondances acceptées sont dans le [contrat de révocation](specifications/06-verification-and-revocation.md).
-La levée de suspension (`removeFromCRL`) n’est pas prise en charge.
+La levée d’une suspension `certificateHold` est disponible via les commandes existantes :
+
+```sh
+make revoke KIND=web SERIAL=1000 REASON=removeFromCRL DRY_RUN=1
+make revoke KIND=web SERIAL=1000 REASON=removeFromCRL
+make revoke-intermediate KIND=web REASON=removeFromCRL
+```
+
+Elle exige `CRL_UPDATE=1` et publie une nouvelle CRL complète sans le certificat
+suspendu. Les révocations définitives ne peuvent pas être annulées. Distribuer
+la nouvelle CRL aux clients ; leurs caches peuvent conserver l’ancienne jusqu’au
+rafraîchissement. Un certificat expiré reste expiré. La levée par lot est refusée.
+Un marqueur `.disabled` indépendant est conservé ; seul celui créé pour cette
+suspension de l’intermédiaire est retiré.
 
 `crl-root` utilise la durée configurée, normalement sept jours ; CRL_DAYS contrôle
 la génération intermédiaire. `crl-all` inclut les répertoires legacy correspondants
@@ -250,9 +279,18 @@ Le rollover conserve le répertoire de l’autorité précédente et crée une n
 autorité active ; il ne révoque ni ne migre les anciens certificats. Le rollback
 conserve l’autorité active avant de restaurer une ancienne ; il n’annule pas les
 révocations. L’inventaire et les lots acceptent des sélecteurs explicites de source,
-d’entrée et de destination. La réémission est **limitée au CN**, sans migration
-fidèle de l’identité complète, des SAN, des profils ou des clés. Les reçus par élément
-bloquent les reprises aveugles après un résultat incertain. Voir la
+d’entrée et de destination. La réémission utilise par défaut `REISSUE_MODE=preserve` :
+elle retrouve les certificats et profils archivés dans `LEGACY_DIR` (automatique
+après rollover), conserve le sujet complet, les SAN, les extensions et leur
+criticité, puis génère de nouvelles clés avec le même algorithme, la même taille
+RSA ou la même courbe EC. Les anciennes clés privées ne sont pas nécessaires.
+Tout le lot est vérifié avant émission, y compris avec `DRY_RUN=1` ; une preuve
+manquante ou un profil incompatible provoque un refus. Le numéro de série,
+l’émetteur, les identifiants SKI/AKI et la validité sont renouvelés (`DAYS` reste
+applicable dans les limites de la chaîne). Ce mode nécessite OpenSSL 3.x.
+L’ancien comportement reste accessible explicitement avec `REISSUE_MODE=cn-only`.
+Une commande personnalisée `ISSUE_CMD` ne bénéficie pas de cette garantie.
+Les reçus par élément bloquent les reprises aveugles après un résultat incertain. Voir la
 [spécification du cycle de vie](specifications/07-lifecycle-and-migration.md).
 
 La préparation/publication d’une CRL finale utilise directement un script :
@@ -288,7 +326,7 @@ suivants peuvent recevoir des noms basés sur le numéro de série. Voir la
 [spécification du stockage](specifications/03-persistence-and-artifacts.md).
 Utiliser `pki-data/` ou une exclusion Git locale explicite pour les données
 personnalisées. Les configurations contiennent des chemins absolus : déplacer un
-workspace exige leur rattachement après examen.
+workspace exige leur rattachement via le mode `RECOVERY_ACTION=relocate` décrit ci-dessous.
 
 Une autorité existante dont la base ou les compteurs manquent est refusée sans
 recréation d’état. Restaurer et réconcilier explicitement les fichiers conservés ;
@@ -305,8 +343,9 @@ jusqu’à examen :
 bin/recovery.sh
 ```
 
-Ce rapport est en lecture seule. La réconciliation et son acquittement sont des
-actions explicites de l’opérateur, pas une réparation automatique. Ne jamais réduire
+Ce rapport est en lecture seule. Les plans d’installation complets disposent
+d’une reprise vérifiée (voir ci-dessous). Les autres cas demandent une réconciliation
+et un acquittement explicites par l’opérateur. Ne jamais réduire
 les compteurs consommés ou répéter aveuglément la signature. Un échec d’actualisation
 ou de publication CRL n’annule pas une révocation locale ou une CRL générée.
 Le [contrat de fiabilité](specifications/08-architecture-and-reliability.md) décrit
@@ -318,7 +357,7 @@ les limites de persistance, les verrous abandonnés et les procédures manuelles
 make help
 make tree
 make ls-web
-make test-stage0 test-stage1 test-stage2 test-stage3 test-stage4 test-stage5 test-stage6 test-stage7 test-stage8
+make test-stage0 test-stage1 test-stage2 test-stage3 test-stage4 test-stage5 test-stage6 test-stage7 test-stage8 test-stage9 test-stage10
 make test-smoke
 ```
 
@@ -354,3 +393,35 @@ Les spécifications de référence sont en anglais ; les guides existent dans le
 - [Choix des profils](specifications/guides/profiles-fr.md)
 - [Procédures de reprise](specifications/guides/recovery-fr.md)
 - [Compatibilité et limites](specifications/09-compatibility-and-limitations.md)
+
+## Reprise vérifiée et déplacement du workspace
+
+Une fois le workspace complet déplacé, sans opérations en cours, ces commandes
+prévisualisent puis appliquent le rattachement au nouvel emplacement :
+
+```sh
+RECOVERY_ACTION=relocate bin/recovery.sh
+RECOVERY_ACTION=relocate RELOCATE_APPLY=1 bin/recovery.sh
+```
+
+Les configurations des autorités racine, imbriquées et historiques et les liens
+absolus internes sont ajustés ; clés, index et compteurs restent conservés.
+Les liens externes, chemins non pris en charge, états incomplets et inclusions de
+configuration sont refusés. Résoudre toute opération en attente avant le déplacement.
+
+Après une interruption de l’installation d’un certificat terminal déjà validé,
+d’une levée de suspension ou d’un rattachement du workspace :
+
+```sh
+RECOVERY_ACTION=resume bin/recovery.sh
+# Ou reprise automatique avant la prochaine commande verrouillée :
+make verify KIND=web CN=app.example.com AUTO_RECOVER=1
+```
+
+La reprise contrôle les empreintes des sources, destinations et états conservés,
+ainsi que les échéances de validité, avant d’installer les fichiers. Elle ne signe
+aucun nouveau certificat. Les journaux terminés restent dans `.recovery/completed-*` ;
+ils peuvent conserver des copies de clés privées, protégées par des permissions
+restrictives. Un résultat de signature incertain, un plan incomplet, un déplacement
+d’autorité interrompu, un verrou périmé ou des données modifiées nécessitent encore
+un examen manuel. Aucun compteur n’est réinitialisé et aucun verrou n’est volé.

@@ -59,9 +59,13 @@ release_locks() {
   local lock_dir
   local idx
 
+  # Also covers commands which install their own EXIT cleanup and batch unlocks.
+  # On barrier failure retain the lock and durable fence for explicit review.
+  durability_finish || return 1
+
   for (( idx=${#__CERTNIFY_LOCK_DIRS[@]}-1; idx>=0; idx-- )); do
     lock_dir="${__CERTNIFY_LOCK_DIRS[$idx]}"
-    [[ -n "$lock_dir" && -d "$lock_dir" ]] && rm -rf "$lock_dir"
+    if [[ -n "$lock_dir" && -d "$lock_dir" ]]; then rm -rf "$lock_dir" || return 1; fi
   done
   __CERTNIFY_LOCK_DIRS=()
 }
@@ -856,6 +860,9 @@ source "$ROOT_DIR/bin/pki-crl.sh"
 source "$ROOT_DIR/bin/pki-policy.sh"
 
 source "$ROOT_DIR/bin/pki-recovery.sh"
+source "$ROOT_DIR/bin/pki-durable.sh"
+source "$ROOT_DIR/bin/pki-resume.sh"
+source "$ROOT_DIR/bin/pki-hold.sh"
 source "$ROOT_DIR/bin/pki-validity.sh"
 
 source "$ROOT_DIR/bin/pki-input.sh"

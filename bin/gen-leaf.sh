@@ -186,7 +186,7 @@ SAN_EMAIL="${SAN_EMAIL:-}"
 SAN_URI="${SAN_URI:-}"
 
 normalize_key_request
-prepare_sans
+if [[ -z "${CERTNIFY_MIGRATION_SOURCE:-}" ]]; then prepare_sans; fi
 
 DAYS="${DAYS:-397}"
 
@@ -239,6 +239,14 @@ INT_CNF="$ROOT_DIR/$INT_DIR/openssl.cnf"
 
 check_config "$INT_DIR"
 check_config root
+
+MIGRATION_CA_ARGS=()
+if [[ -n "${CERTNIFY_MIGRATION_SOURCE:-}" ]]; then
+  source "$ROOT_DIR/bin/pki-migration.sh"
+  migration_load "$CERTNIFY_MIGRATION_SOURCE" "${SERIAL:?}" "$CN" "${EXPIRES:?}"
+  migration_preflight
+  MIGRATION_CA_ARGS=(-preserveDN)
+fi
 
 # ---- Rotate mode (chemin suffixé) ----
 ROTATE_MODE=0
@@ -342,7 +350,11 @@ if [[ -n "$SAN_DNS" || -n "$SAN_IP" || -n "$SAN_EMAIL" || -n "${SAN_URI:-}" ]]; 
   fi
 fi
 
-EXPECTED_SANS="$(expected_leaf_sans)" || die "Cannot validate requested/profile SANs"
+if [[ -n "${CERTNIFY_MIGRATION_SOURCE:-}" ]]; then
+  EXPECTED_SANS="$(san_names certificate "$MIGRATION_CERT")"
+else
+  EXPECTED_SANS="$(expected_leaf_sans)" || die "Cannot validate requested/profile SANs"
+fi
 
 # ---- Preflight: block issuance if intermediate is revoked/disabled ----
 INT_CA_CERT="$INT_DIR/certs/ca.cert.pem"
@@ -495,8 +507,14 @@ else
 fi
 
 # ---- CSR ----
-info "Creating CSR for CN='${CN}' (DN: C='${C}' O='${O}' OU='${OU}')…"
-if [[ "$QUIET_OPENSSL" == "1" ]]; then
+if [[ -n "${CERTNIFY_MIGRATION_SOURCE:-}" ]]; then
+  info "Creating CSR with original subject and SANs from $MIGRATION_CERT"
+else
+  info "Creating CSR for CN='${CN}' (DN: C='${C}' O='${O}' OU='${OU}')…"
+fi
+if [[ -n "${CERTNIFY_MIGRATION_SOURCE:-}" ]]; then
+  migration_request "$KEY_PATH" "$CSR_PATH"
+elif [[ "$QUIET_OPENSSL" == "1" ]]; then
   "$OPENSSL" req -utf8 -new -sha256 \
     -config "$REQ_CNF_DN" \
     ${SAN_DNS:+-reqexts certnify_request_san} ${SAN_IP:+-reqexts certnify_request_san} ${SAN_EMAIL:+-reqexts certnify_request_san} ${SAN_URI:+-reqexts certnify_request_san} \
@@ -527,14 +545,14 @@ TMPCRT="$(mktemp "$INT_DIR/certs/.tmp.XXXXXX")"
 recovery_signing "$INT_DIR" "$TMPCRT"
 info "Signing leaf via intermediate '$INT_DIR' for ${DAYS} days (extensions: ${EXT_SECTION})…"
 if [[ "$QUIET_OPENSSL" == "1" ]]; then
-  "$OPENSSL" ca -batch \
+  "$OPENSSL" ca -batch ${MIGRATION_CA_ARGS[@]+"${MIGRATION_CA_ARGS[@]}"} \
     -config "$INT_CNF" \
     -extensions "$EXT_SECTION" \
     -startdate "$ISSUE_NOT_BEFORE" -enddate "$ISSUE_NOT_AFTER" -notext -md sha256 \
     -in "$CSR_PATH" \
     -out "$TMPCRT" >/dev/null 2>&1
 else
-  "$OPENSSL" ca -batch \
+  "$OPENSSL" ca -batch ${MIGRATION_CA_ARGS[@]+"${MIGRATION_CA_ARGS[@]}"} \
     -config "$INT_CNF" \
     -extensions "$EXT_SECTION" \
     -startdate "$ISSUE_NOT_BEFORE" -enddate "$ISSUE_NOT_AFTER" -notext -md sha256 \
@@ -560,6 +578,9 @@ if [[ -n "$SERIAL_HEX_ACTUAL" && -f "$INT_INDEX" ]]; then
 fi
 
 recovery_phase "issuance-committed serial=$SERIAL_HEX_ACTUAL"
+if [[ -n "${CERTNIFY_MIGRATION_SOURCE:-}" ]]; then
+  migration_compare "$MIGRATION_CERT" "$TMPCRT"
+fi
 actual_sans="$(san_names certificate "$TMPCRT")" || die "Cannot decode issued SANs; issuance committed, review required"
 [[ "$actual_sans" == "$EXPECTED_SANS" ]] || die "Issued SANs differ from the effective request; issuance committed, certificate not installed"
 bind_leaf "$INT_DIR" "$TMPCRT" "$CURRENT_ISSUER_ID"
@@ -570,97 +591,65 @@ printf 'SCHEMA=1\nPOLICY_SHA256=%s\nEXT_SECTION=%s\nALG=%s\n' "$LEAF_POLICY_SHA2
 staged_install "$policy_tmp" "$policy_record"
 rm -f "$policy_tmp"
 
-# ---- If destination exists, suffix with the serial to avoid overwrite ----
-if [[ ( -e "$CRT_PATH" || -n "$CANON_LEAF_KEY" ) && -n "$SERIAL_HEX_ACTUAL" ]]; then
+# Verify the signed artifact before publishing any deployment path. A sealed
+# installation plan can then be resumed without invoking the signing backend.
+check_pair "$TMPCRT" "$KEY_PATH"
+[[ "$(certificate_id "$TMPCRT")" == "$(certificate_id "$INT_DIR/newcerts/$SERIAL_HEX_ACTUAL.pem")" ]] \
+  || die "Issued certificate differs from retained history; manual review required"
+"$OPENSSL" verify -auth_level 2 -untrusted "$INT_DIR/certs/ca.cert.pem" \
+  -CAfile "$ROOT_DIR/root/certs/ca.cert.pem" "$TMPCRT" >/dev/null \
+  || die "Issued leaf chain verification failed; manual review required"
+
+OLD_KEY_PATH="$KEY_PATH"
+OLD_CSR_PATH="$CSR_PATH"
+if [[ "$ROTATE_MODE" == 1 || -n "$CANON_LEAF_KEY" ]]; then
+  KEY_PATH="$INT_DIR/private/srl-${SERIAL_HEX_ACTUAL}-${ARTIFACT_STEM}.key.pem"
+  CSR_PATH="$INT_DIR/csr/srl-${SERIAL_HEX_ACTUAL}-${ARTIFACT_STEM}.csr.pem"
+  CRT_PATH="$INT_DIR/certs/srl-${SERIAL_HEX_ACTUAL}-${ARTIFACT_STEM}.cert.pem"
+elif [[ -e "$CRT_PATH" ]]; then
   CRT_PATH="$INT_DIR/certs/srl-${SERIAL_HEX_ACTUAL}-${ARTIFACT_STEM}.cert.pem"
 fi
-
-# ---- Staged single-file replacement + permissions ----
-authority_path "$INT_DIR" "$ROOT_DIR/$CRT_PATH" >/dev/null
-[[ ! -e "$CRT_PATH" && ! -L "$CRT_PATH" ]] || die "Certificate destination already exists: $CRT_PATH"
-check_pair "$TMPCRT" "$KEY_PATH"
-if [[ -n "$CANON_LEAF_KEY" ]]; then
-  NEW_KEY="$INT_DIR/private/srl-${SERIAL_HEX_ACTUAL}-${ARTIFACT_STEM}.key.pem"
-  NEW_CSR="$INT_DIR/csr/srl-${SERIAL_HEX_ACTUAL}-${ARTIFACT_STEM}.csr.pem"
-  for output in "$NEW_KEY" "$NEW_CSR"; do
-    authority_path "$INT_DIR" "$ROOT_DIR/$output" >/dev/null
-    [[ ! -e "$output" && ! -L "$output" ]] || die "Replacement destination already exists: $output"
-  done
-  staged_install "$KEY_PATH" "$NEW_KEY" 600
-  staged_install "$CSR_PATH" "$NEW_CSR"
-  rm -f "$KEY_PATH"
-  rm -f "$CSR_PATH"
-  KEY_PATH="$NEW_KEY"
-  CSR_PATH="$NEW_CSR"
-fi
-staged_install "$TMPCRT" "$CRT_PATH"
-rm -f "$TMPCRT"
-chmod 444 "$CRT_PATH"
-recovery_phase certificate-installed
-info "Leaf certificate ready: $CRT_PATH"
-
-# ---- Rotate: renommer les artefacts en <CN>-<SERIAL> ----
-if [[ "$ROTATE_MODE" == "1" && -n "$SERIAL_HEX_ACTUAL" ]]; then
-  NEW_BASE="srl-${SERIAL_HEX_ACTUAL}-${ARTIFACT_STEM}"
-  NEW_KEY="$INT_DIR/private/${NEW_BASE}.key.pem"
-  NEW_CRT="$INT_DIR/certs/${NEW_BASE}.cert.pem"
-  NEW_CSR="$INT_DIR/csr/${NEW_BASE}.csr.pem"
-
-  for output in "$NEW_KEY" "$NEW_CRT" "$NEW_CSR"; do
-    authority_path "$INT_DIR" "$ROOT_DIR/$output" >/dev/null
-    [[ ! -e "$output" && ! -L "$output" ]] || die "Rotated destination already exists: $output"
-  done
-
-  # Renommer si les chemins actuels diffèrent
-  [[ "$KEY_PATH" != "$NEW_KEY" && -f "$KEY_PATH" ]] && mv -f "$KEY_PATH" "$NEW_KEY"
-  [[ "$CRT_PATH" != "$NEW_CRT" && -f "$CRT_PATH" ]] && mv -f "$CRT_PATH" "$NEW_CRT"
-  [[ -f "$CSR_PATH" ]] && [[ "$CSR_PATH" != "$NEW_CSR" ]] && mv -f "$CSR_PATH" "$NEW_CSR"
-
-  KEY_PATH="$NEW_KEY"
-  CRT_PATH="$NEW_CRT"
-  CSR_PATH="$NEW_CSR"
-  info "Rotate: artefacts renommés → ${NEW_BASE}.*.pem"
-fi
-
-# ---- Full chain next to the cert (optional but handy) ----
 CHAIN_PATH="${CRT_PATH%.cert.pem}.fullchain.cert.pem"
-authority_path "$INT_DIR" "$ROOT_DIR/$CHAIN_PATH" >/dev/null
-if [[ -f "$INT_DIR/certs/ca.cert.pem" ]]; then
-  chain_tmp="$(mktemp "$INT_DIR/certs/.chain.XXXXXX")"
-  cat "$CRT_PATH" "$INT_DIR/certs/ca.cert.pem" > "$chain_tmp"
-  staged_install "$chain_tmp" "$CHAIN_PATH"
-  rm -f "$chain_tmp"
-  info "Full chain ready: $CHAIN_PATH"
+for output in "$CRT_PATH" "$CHAIN_PATH"; do
+  authority_path "$INT_DIR" "$ROOT_DIR/$output" >/dev/null
+  [[ ! -e "$output" && ! -L "$output" ]] || die "Certificate destination already exists: $output"
+done
+chain_tmp="$(mktemp "$INT_DIR/certs/.chain.XXXXXX")"
+cat "$TMPCRT" "$INT_DIR/certs/ca.cert.pem" > "$chain_tmp"
+recovery_plan_begin
+LC_ALL=C "$OPENSSL" x509 -in "$TMPCRT" -noout -enddate | recovery_plan_deadline
+for evidence in "$INT_DIR/index.txt" "$INT_DIR/serial" "$INT_DIR/openssl.cnf" \
+  "$INT_DIR/newcerts/$SERIAL_HEX_ACTUAL.pem" "$INT_DIR/issuers/$SERIAL_HEX_ACTUAL" \
+  "$policy_record" "$INT_DIR/certs/ca.cert.pem" "$ROOT_DIR/root/certs/ca.cert.pem" "$ROOT_DIR/root/index.txt"; do
+  recovery_plan_guard "$evidence"
+done
+if [[ "$KEY_PATH" != "$OLD_KEY_PATH" ]]; then
+  for output in "$KEY_PATH" "$CSR_PATH"; do
+    authority_path "$INT_DIR" "$ROOT_DIR/$output" >/dev/null
+    [[ ! -e "$output" && ! -L "$output" ]] || die "Key/CSR destination already exists: $output"
+  done
+  recovery_plan_add "$OLD_KEY_PATH" "$KEY_PATH" 600
+  recovery_plan_add "$OLD_CSR_PATH" "$CSR_PATH"
+else
+  recovery_plan_guard "$KEY_PATH"
+  recovery_plan_guard "$CSR_PATH"
 fi
-
-# ---------------------------
-# Tests d’intégrité post-émission (LEAF)
-# ---------------------------
-recovery_phase post-verification
-INT_CRT="${INT_DIR}/certs/ca.cert.pem"
-ROOT_CRT="root/certs/ca.cert.pem"
-
-[[ -s "$INT_CRT"  ]] || die "Certificat intermédiaire introuvable: $INT_CRT"
-[[ -s "$ROOT_CRT" ]] || die "Certificat ROOT introuvable: $ROOT_CRT"
-
-if [[ -s "$CRT_PATH" ]]; then
-  # Intermédiaire en -untrusted (chaîne non ancrée), ROOT en -CAfile (ancrage de confiance)
-  if "$OPENSSL" verify -auth_level 2 -untrusted "$INT_CRT" -CAfile "$ROOT_CRT" "$CRT_PATH" >/dev/null; then
-    info "Vérification OK (leaf valide sous l’intermédiaire et la root)."
-  else
-    die  "Vérification de chaîne échouée pour le leaf ($CRT_PATH)"
-  fi
-fi
-
+recovery_plan_add "$TMPCRT" "$CRT_PATH"
+recovery_plan_add "$chain_tmp" "$CHAIN_PATH"
 if [[ -n "$CANON_LEAF_KEY" ]]; then
-  # Keep a complete serial-named set, then replace the conventional deployment
-  # paths only after validation. The journal covers interruption between renames.
-  recovery_phase canonical-replacement
-  staged_install "$KEY_PATH" "$CANON_LEAF_KEY" 600
-  staged_install "$CSR_PATH" "$INT_DIR/csr/${ARTIFACT_STEM}.csr.pem"
-  staged_install "$CRT_PATH" "$INT_DIR/certs/${ARTIFACT_STEM}.cert.pem"
-  staged_install "$CHAIN_PATH" "$INT_DIR/certs/${ARTIFACT_STEM}.fullchain.cert.pem"
-  check_pair "$INT_DIR/certs/${ARTIFACT_STEM}.cert.pem" "$CANON_LEAF_KEY"
-  info "Canonical leaf key, certificate and chain replaced: ${ARTIFACT_STEM}"
+  recovery_plan_add "$OLD_KEY_PATH" "$CANON_LEAF_KEY" 600
+  recovery_plan_add "$OLD_CSR_PATH" "$INT_DIR/csr/${ARTIFACT_STEM}.csr.pem"
+  recovery_plan_add "$TMPCRT" "$INT_DIR/certs/${ARTIFACT_STEM}.cert.pem"
+  recovery_plan_add "$chain_tmp" "$INT_DIR/certs/${ARTIFACT_STEM}.fullchain.cert.pem"
 fi
+# Temporary keys/CSRs are retained in the private completion journal before removal.
+if [[ "$KEY_PATH" != "$OLD_KEY_PATH" ]]; then
+  recovery_plan_add "" "$OLD_KEY_PATH" 600 D
+  recovery_plan_add "" "$OLD_CSR_PATH" 444 D
+fi
+recovery_plan_seal
+recovery_resume
+rm -f "$TMPCRT" "$chain_tmp"
+info "Leaf certificate ready: $CRT_PATH"
+info "Full chain ready: $CHAIN_PATH"
 recovery_complete

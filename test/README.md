@@ -1,6 +1,6 @@
 # Isolated validation
 
-Tests require Python 3.8+ in addition to the toolkit dependencies. Python is not a dependency of normal CA operations.
+Python 3.8+ is required both by the tests and by the runtime durability helper.
 
 ```sh
 make test-stage0
@@ -12,6 +12,9 @@ make test-stage5
 make test-stage6
 make test-stage7
 make test-stage8
+make test-stage9
+make test-stage10
+make test-stage11
 make test-smoke
 ```
 
@@ -92,3 +95,47 @@ defaults through Make, direct and batch issuance while retaining explicit validi
 limits. Seven selected stage-6 scenarios and three selected stage-8 scenarios
 passed; this is not a full-suite or smoke rerun. Exact executed scenario names are
 recorded in the [acceptance map](../specifications/10-acceptance-and-traceability.md).
+
+## Preserving migration
+
+`make test-stage9` exercises source-backed batch migration in disposable PKIs:
+full UTF-8 subjects, mixed SANs, key rotation/parameters, S/MIME profile variants,
+absent/critical SANs, custom profiles and extended subjects, dry-run immutability,
+retry receipts, missing metadata, policy drift and backend decoding failure.
+Requires OpenSSL 3.x. Compatibility adapter tests explicitly select `cn-only`.
+
+## Hold release, verified recovery and workspace relocation
+
+`make test-stage10` uses disposable root/intermediate PKIs and injected rename
+failures. It covers held leaf/intermediate release, irreversible revocation refusal,
+historical issuer CRLs, read-only previews, independent disable flags, interrupted
+index/CRL and key/certificate publication, evidence drift, incomplete/corrupt plans,
+and offline workspace rebinding with nested authorities and absolute aliases.
+It checks preserved keys/counters/history and successful operations after recovery.
+No live authority, real workspace relocation or power-loss fault is exercised.
+
+Maintenance validation on 2026-09-21: 101 distinct test methods across stages 0–10
+passed, with targeted reruns after adjustments; syntax, source-manifest, relative
+link and diff checks passed. Smoke was not rerun. See the
+[maintenance evidence](../specifications/10-acceptance-and-traceability.md#maintenance-validation-2026-09-21)
+for exact counts, environment and qualification limits.
+
+Stage 8 also covers exact URI/subject identities, strict verification without SANs,
+reference-time validation, invalid timestamps and CRL time-window rejection.
+
+## Durable operations
+
+`make test-stage11` checks intent/data/completion ordering, failed barriers,
+platform-specific full flush failures, checkpoint admission, special-file refusal,
+backend interruption without an issuance journal, interrupted sealed installation,
+and failed intent/final barriers. Integration tests use real local persistence
+calls and disposable PKIs; injected failures live only in test fixtures/mocks.
+This tests the software protocol, not actual power loss, disk-cache behavior,
+network storage or Linux qualification. Do not power-cycle a live CA to run it.
+
+Durability validation on 2026-09-21: 115 distinct methods across stages 0–11 passed,
+including the 13-method durability gate and targeted reruns after final changes.
+Smoke also passed before the last admission/review refinements; those refinements
+were checked with targeted tests. See the
+[durability evidence](../specifications/10-acceptance-and-traceability.md#durability-validation-2026-09-21)
+for the precise incremental-validation and hardware/platform limits.

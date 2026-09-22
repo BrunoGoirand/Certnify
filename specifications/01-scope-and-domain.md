@@ -35,8 +35,34 @@ Root creation is idempotent for a matching subject and key. Intermediate generat
 
 ## Operational boundaries
 
+### Exclusive ownership of operational PKI state
+
+All writes to operational PKI state MUST go through supported Certnify operations,
+including the OpenSSL subprocesses they control. This covers keys, certificates,
+installed authority configuration, indexes, counters, CRLs, metadata, history,
+aliases, locks and recovery journals. Direct OpenSSL administration, manual file
+edits and third-party scripts writing that state are unsupported, even when no
+toolkit command is running. Editing source templates for future authorities is
+distinct from modifying installed authority state.
+
+Deployment MUST exclude external writers: other accounts and applications must
+not have write access, and synchronization agents must not restore, merge or
+replace files in the live PKI. Publication hooks may read/export final artifacts
+but MUST NOT modify local PKI state. Backups must use a consistent offline copy
+or a qualified snapshot; restoration and exceptional repair require a separately
+documented offline maintenance procedure before toolkit use resumes. Such
+maintenance is not a supported alternative write interface.
+
+This is a required operating contract, not a protection currently enforced against
+all processes. The shell toolkit inherits the invoking account's privileges;
+its lock cannot exclude another process with the same filesystem permissions.
+Enforcement requires OS access isolation, typically a dedicated account and a
+controlled command entry point without arbitrary write or shell access. A missing
+supported maintenance command requires an explicit toolkit extension, not routine
+manual editing. See chapter 08 for reliability and chapter 09 for residual limits.
+
 No automatic renewal scheduler, ACME enrollment, external CSR enrollment command, OCSP responder, trust-store installation, public CA integration, HSM interface, encrypted-key password workflow, PKCS#12 export, certificate-transparency integration, remote repository, or backup service is implemented. There is no runtime package installation or implicit network access in ordinary CA operations.
 
 Publication exists only as an explicit administrator-supplied shell command for final CRL artifacts. Root rollover is not implemented. The hierarchy is normally root → intermediate → leaf; intermediate profiles prohibit subordinate CAs through `pathlen:0`.
 
-The current shell implementation requires Bash, Make for its public facade, OpenSSL accepted by the shared version check, and ordinary Unix text/file tools. Bash 3.2 portability is an implementation goal visible in the code, not a claim that every command has been tested on every platform.
+The current implementation requires Bash, Make for its public facade, OpenSSL accepted by the shared version check, Python 3.8+ for durability barriers, and ordinary Unix text/file tools. Durability primitives support macOS and Linux on a single local filesystem; storage qualification remains separate. Bash 3.2 portability is an implementation goal visible in the code, not a claim that every command has been tested on every platform.

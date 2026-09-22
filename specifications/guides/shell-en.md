@@ -4,6 +4,11 @@ This document summarizes the scripts in the `bin/` directory, their main purpose
 
 See also `profiles-en.md` for the reference of the OpenSSL profiles used by these scripts.
 
+All mutating commands require Python 3.8+ through `pki-durable.sh` and
+`pki-durable.py`. They persist operation intent and local results, and block after
+uncertain power loss; see [recovery](recovery-en.md). The helper supports Linux
+and macOS persistence barriers, without claiming hardware power-cut qualification.
+
 ## Overview
 
 | Script | Description | Main dependencies |
@@ -64,9 +69,16 @@ See [commands and defaults](../02-commands-and-configuration.md) and [recovery](
   issuer CRLs. For a custom authority use `make crl INT_DIR=pki-data/custom
   CRL_HISTORY=1` on one line. Keys must be retained for every selected generation;
   the operation does not recover missing keys or publish remotely.
-- Built-in batch reissuance still warns that it is CN-only. Person names without
-  @ no longer receive an invented email SAN.
+- Built-in batch reissuance preserves subject, SANs, profile and key parameters
+  from source certificates and archived profiles by default. The historical lossy
+  behavior requires `REISSUE_MODE=cn-only` and emits a warning. Chapter 07 describes
+  the source evidence and preflight requirements.
 
 `pki-clean.sh` implements cleanup; `pki-crl-history.sh` preflights the renewal set.
 Historical CRL renewal is per-file, so a later error can leave earlier renewals
 committed. Full behavioral contracts and examples are in chapters 02, 05 and 06.
+
+Verification also accepts VERIFY_URI (exact URI SAN), VERIFY_SUBJECT (complete
+RFC2253 subject without `subject=`), and VERIFY_ATTIME (nonnegative Unix seconds).
+Strict subject verification supports certificates without SANs. Both certificates
+and CRLs are evaluated at the selected time; retained CRLs must cover that time.

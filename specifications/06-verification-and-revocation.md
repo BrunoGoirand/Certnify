@@ -10,7 +10,15 @@ root is the trust anchor, independent of directory depth. Issuer names alone do
 not establish ownership. VERIFY_DNS, VERIFY_IP and VERIFY_EMAIL supply one explicit
 expected identity through OpenSSL's verify_hostname, verify_ip or verify_email.
 VERIFY_PURPOSE supplies an explicit application purpose; unsupported backend
-purposes fail. No historical-time verification option is supplied.
+purposes fail. VERIFY_URI matches a complete URI SAN exactly, case-sensitively, without
+normalization. VERIFY_SUBJECT matches the complete RFC2253 subject (without the
+OpenSSL `subject=` prefix) exactly, including for certificates without SANs.
+All five identity selectors are mutually exclusive. URI/subject mismatch is a
+preflight failure in every mode. Subject matching is not certificate pinning.
+VERIFY_ATTIME accepts canonical nonnegative Unix seconds through 253402300799
+(year 9999). Certificate and CRL validation use that same reference time.
+The retained CRLs must cover that time; no historical CRLs are fetched or
+reconstructed, and past signing time or trust policy is not established.
 
 ## Strict CRL verification
 
@@ -20,7 +28,7 @@ CRL. After an in-place rekey, the latter is the historical generation's CRL.
 There is no implicit root-only or issuer-only fallback.
 
 Each required CRL must be a single PEM CRL, have the expected issuer name, verify
-with that issuer's public key, and satisfy `lastUpdate <= now < nextUpdate`.
+with that issuer's public key, and satisfy `lastUpdate <= reference time < nextUpdate`.
 Missing, malformed, expired, future-dated, wrong-issuer and invalid-signature CRLs
 are rejected. This is a local-file contract; the toolkit does not fetch CRL URLs.
 The two validated CRLs are combined into one temporary PEM bundle, supplied once
@@ -53,7 +61,7 @@ success is not evidence of certificate validity; inspect `VERIFY STATUS`.
 
 VERIFY_MODE=strict requires exactly one expected identity and a specific purpose
 (other than any). It always enables full-chain CRLs, even if VERIFY_CRL=0 was
-passed. It requires the selected identity type in SAN, so CN fallback cannot
+passed. Except for explicit VERIFY_SUBJECT, it requires the selected identity type in SAN, so CN fallback cannot
 satisfy strict verification. The ordinary and CRL backend calls both carry the
 identity/purpose checks, -x509_strict and -check_ss_sig. Every missing input,
 backend error, identity/purpose mismatch or revocation is a nonzero result.
@@ -93,9 +101,28 @@ Supported reasons are `unspecified`, `keyCompromise`, `CACompromise`,
 `AACompromise`. `privilegeWithdrawn` maps to `MAP_PRIV_WITHDRAWN_TO` (default
 `cessationOfOperation`); the mapped value is validated too.
 
-`removeFromCRL` is rejected before acquiring a mutation lock or modifying state,
-including when selected through the mapping option. Release from certificateHold
-is not implemented. An existing R record must not be reported as an unrevocation.
+Explicit `REASON=removeFromCRL` on the single-leaf and single-intermediate targets
+releases only an R row whose exact reason is `certificateHold`, with matching
+retained certificate and issuer evidence. It requires `CRL_UPDATE=1`. The staged
+index changes only that row to V (or E if expired), clears its revocation field,
+and restores its retained locator. A complete CRL is generated against that staged
+index, consuming the real CRL counter. The validated index and CRL installation
+are sealed in a recoverable plan before publication. Recovery never regenerates
+the CRL or reduces its counter; its expiry is checked again before installation.
+
+Per [RFC 5280 section 5.3.1](https://www.rfc-editor.org/rfc/rfc5280#section-5.3.1), `removeFromCRL` entries belong only in delta CRLs.
+Certnify instead removes the held entry from the next complete CRL. Other revoked
+rows remain unchanged. Failed preparation can consume a CRL number but leaves the
+installed index/CRL unchanged and requires review if no complete plan exists.
+Permanent revocations, ordinary V/E rows, mapping `privilegeWithdrawn` to a release,
+and bulk releases are rejected. Repeating a completed release reports that the
+certificate is no longer suspended. Distribute the new CRL; cached older CRLs can
+still report suspension until refreshed. An expired certificate is never revived.
+
+Intermediate hold revocation creates a certificate-bound `.disabled` marker when
+none exists. Release removes only that matching marker; independent/legacy markers
+remain for operator review. Existing journals/index history remain in private
+completion receipts. All selection ambiguity still requires FILE or SERIAL.
 
 Leaf and intermediate revocation validate the selected durable record. An R
 record is not submitted to OpenSSL again; repeat calls do not rewrite its reason

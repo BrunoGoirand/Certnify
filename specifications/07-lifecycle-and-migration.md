@@ -63,20 +63,50 @@ are safe. Direct script invocation can infer a kind only from the documented
 built-in issuance destination, not only its preflight checks.
 
 The four-column inventory remains the format in chapter 03. All rows are validated
-before running a child command. Built-in issuance passes values as environment
-data to the corresponding leaf wrapper; inventory text is never evaluated as
-shell code. Web adds DNS:CN; auth/user/smime add email:CN only when the CN
-contains @, and otherwise leave the batch SAN empty. Code/archive add no batch
-SAN. Email-like values still pass normal SAN validation; arbitrary person names
-are no longer forced into email SAN syntax. Existing wrapper policy and configured options still apply. Default
-lifetimes are 397, 825, 730, 730, and 3600 days, respectively.
+before running a child command. Inventory text is never evaluated as shell code.
 
-**This is legacy CN-only reissuance, not a complete certificate migration.** It
-does not recover original subjects, all SANs, extensions, key policy, or expiry
-from four columns. The expiry and old serial identify an input row; they are not
-assigned to the new certificate. A warning announces this mode. The destination
-uses its current profile/configuration and key-reuse behavior. Old leaves are
-not automatically revoked.
+### Preserving migration (default)
+
+`REISSUE_MODE=preserve` resolves each original serial in `LEGACY_DIR/index.txt`,
+checks the CN and exported expiry, and reads the immutable `newcerts/<serial>.pem`.
+It verifies the certificate binding/signature and requires a schema-1
+`issuers/<serial>.policy` record plus its intact archived configuration. Missing
+source evidence fails; the TSV alone is insufficient. Without a detected legacy,
+select `LEGACY_DIR` explicitly. Source certificate fingerprints are checked again
+inside the child issuance transaction.
+
+The recorded extension section is selected in the destination configuration.
+A disposable CSR/certificate preflight verifies the complete subject DER and all
+extension values/criticality against the source, excluding SKI/AKI which belong
+to the new key and issuer. SANs are copied directly from the certificate, including
+an absent SAN; no CN-derived default is added. Only SANs are copied to the CSR:
+other extensions must be supplied identically by the destination profile, otherwise
+migration fails. Unsupported custom profiles/extensions are never silently dropped.
+All rows pass this preflight before the first receipt or certificate is written.
+`DRY_RUN=1` runs this same preflight using temporary files without CA state changes.
+
+The source public key determines RSA size (exponent 65537), named EC curve, or
+Ed25519/Ed448 variant. Current minimum-strength/algorithm restrictions still apply.
+Fresh private keys are always generated in rotation mode; old private keys are not
+read. Ambient subject/SAN/profile/key options cannot replace the source values.
+The actual issued subject and extensions are checked again before installation;
+a post-commit mismatch leaves a recovery journal and a review-required receipt.
+This mode requires OpenSSL 3.x certificate-to-CSR extension copying. It does not
+add a Python runtime dependency.
+
+Issuer, serial number, signature, SKI/AKI and validity are renewed, not copied.
+`DAYS` retains its normal meaning and chain lifetime checks; default lifetimes are
+397, 825, 730, 730 and 3600 days for web, auth/user, smime, code and archive.
+Old leaves are not automatically revoked. Key storage/encryption/HSM policies
+cannot be inferred from a certificate and remain outside this local toolkit.
+
+### Explicit compatibility mode
+
+`REISSUE_MODE=cn-only` retains the old lossy behavior with a warning. Web adds
+DNS:CN; auth/user/smime add email:CN when CN contains @. Other wrapper defaults
+and configured options apply. This mode does not recover original subject, SANs,
+profile or key parameters and does not require source certificates. Use it only
+when that loss has been reviewed.
 
 `ISSUE_CMD` remains an explicitly supplied, trusted Bash command. It receives
 `CN`, `SERIAL`, `EXPIRES`, `INT_DIR`, `ACTIVE_DIR`, `LEGACY_DIR`, and the expected
@@ -104,8 +134,10 @@ rows and runs no issuance command or receipt write.
 
 Reissuance receipts live inside the active authority at `reissues/<id>`. The ID
 is SHA-256 of newline-terminated issuer certificate ID, resolved legacy directory
-(or empty string), old serial, exported expiry, and CN, in that order. The file
-contains one newline-terminated state: `started`, `completed`, or `needs_review`.
+(or empty string), old serial, exported expiry, and CN, in that order. Preserving
+migration appends
+`preserve` and the source certificate ID. Compatibility/custom commands retain
+the historical five-field receipt identity. The file contains one newline-terminated state: `started`, `completed`, or `needs_review`.
 Claiming an item and updating its receipt use the workspace lock; it is released
 before the child transaction. A concurrent run cannot claim an existing receipt.
 Changing a command/profile does not reset a receipt for the same input identity.

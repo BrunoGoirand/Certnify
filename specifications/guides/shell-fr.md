@@ -1,5 +1,11 @@
 # Scripts Shell
 
+Les commandes qui modifient la PKI exigent Python 3.8+ via `pki-durable.sh` et
+`pki-durable.py`. Ces composants rendent durables l’intention et le résultat local,
+et bloquent après une coupure incertaine ; voir le [guide de reprise](recovery-fr.md).
+Les barrières Linux et macOS sont prises en charge ; les coupures matérielles
+réelles restent à qualifier.
+
 Ce document récapitule les scripts du répertoire `bin/`, leur rôle principal et leurs dépendances les plus visibles.
 
 Voir aussi `profiles-fr.md` pour la référence des profils OpenSSL utilisés par ces scripts.
@@ -63,9 +69,16 @@ jamais une clé d’autorité.
   courants/historiques découverts. Pour un chemin personnalisé, utiliser sur une
   ligne `make crl INT_DIR=pki-data/custom CRL_HISTORY=1`. Les anciennes clés doivent
   être conservées. Il n’y a ni récupération de clés ni publication distante.
-- Le batch reste une réémission limitée au CN et l’annonce. Un nom de personne
-  sans @ ne reçoit plus artificiellement un SAN email.
+- Le batch conserve par défaut le sujet, les SAN, le profil et les paramètres
+  cryptographiques depuis les certificats sources et profils archivés. Le mode
+  historique exige `REISSUE_MODE=cn-only` ; il annonce la perte d’informations.
+  Voir le chapitre 07 pour le précontrôle et les sources requises.
 
 `pki-clean.sh` contrôle le nettoyage ; `pki-crl-history.sh` prépare les CRL à
 renouveler. Leur remplacement est individuel : un échec tardif peut laisser des
 renouvellements déjà acquis. Voir les chapitres 02, 05 et 06 pour les contrats.
+
+La vérification accepte aussi VERIFY_URI (SAN URI exact), VERIFY_SUBJECT (sujet
+RFC2253 complet sans `subject=`) et VERIFY_ATTIME (secondes Unix positives ou nulles).
+Le sujet explicite permet le mode strict sans SAN. La date choisie vaut pour les
+certificats et les CRL ; les CRL conservées doivent couvrir cette date.

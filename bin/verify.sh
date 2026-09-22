@@ -18,7 +18,8 @@
 # - Vérif : root en -CAfile (ancre) + intermédiaire en -untrusted (chaîne)
 # - VERIFY_CRL=1 requires valid issuer and root CRLs with full-chain coverage
 # - VERIFY_MODE = normal | tolerate_revoked | info | strict
-# - VERIFY_DNS / VERIFY_IP / VERIFY_EMAIL: one explicit expected identity
+# - VERIFY_DNS / VERIFY_IP / VERIFY_EMAIL / VERIFY_URI / VERIFY_SUBJECT: one expected identity
+# - VERIFY_ATTIME: nonnegative Unix seconds, used for certificates and CRLs
 # - VERIFY_PURPOSE: explicit OpenSSL application purpose
 
 set -euo pipefail
@@ -26,7 +27,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bin/pki-env.sh
 source "${SCRIPT_DIR}/pki-env.sh"
 [[ -z "${CHAIN:-}" ]] || die "CHAIN override is unsupported; select INT_DIR/KIND to use the bound issuer and workspace root"
-pki_begin
+pki_begin read
 
 OPENSSL="${OPENSSL:-openssl}"
 
@@ -74,7 +75,7 @@ VERIFY_MODE="${VERIFY_MODE:-normal}"  # normal | tolerate_revoked | info | stric
 identity_count=0
 identity_type=''
 identity_value=''
-for identity_type_candidate in DNS IP EMAIL; do
+for identity_type_candidate in DNS IP EMAIL URI; do
   variable="VERIFY_$identity_type_candidate"
   value="${!variable-}"
   [[ -n "$value" ]] || continue
@@ -83,7 +84,17 @@ for identity_type_candidate in DNS IP EMAIL; do
   [[ "$normalized" == "$value" ]] || die "$variable must be a single normalized identity"
   identity_count=$((identity_count+1)); identity_type="$identity_type_candidate"; identity_value="$value"
 done
-(( identity_count <= 1 )) || die "Specify only one of VERIFY_DNS, VERIFY_IP or VERIFY_EMAIL"
+if [[ -n "${VERIFY_SUBJECT:-}" ]]; then
+  [[ "$VERIFY_SUBJECT" != *$'\n'* && "$VERIFY_SUBJECT" != *$'\r'* ]] || die "VERIFY_SUBJECT must be one RFC2253 subject"
+  identity_count=$((identity_count+1)); identity_type=SUBJECT; identity_value="$VERIFY_SUBJECT"
+fi
+(( identity_count <= 1 )) || die "Specify only one of VERIFY_DNS, VERIFY_IP, VERIFY_EMAIL, VERIFY_URI or VERIFY_SUBJECT"
+verification_time=''
+if [[ -n "${VERIFY_ATTIME:-}" ]]; then
+  [[ "$VERIFY_ATTIME" =~ ^(0|[1-9][0-9]{0,11})$ ]] || die "VERIFY_ATTIME expects nonnegative Unix seconds (at most 12 digits)"
+  verification_time="$(PKI_TIME_MODE=encode PKI_TIME_VALUE="$VERIFY_ATTIME" LC_ALL=C awk -f "$ROOT_DIR/bin/pki-time.awk")" || die "Cannot convert VERIFY_ATTIME"
+  verification_time="${verification_time%Z}"
+fi
 case "${VERIFY_PURPOSE:-}" in
   ''|sslclient|sslserver|nssslserver|smimesign|smimeencrypt|crlsign|any|ocsphelper|timestampsign|codesign) ;;
   *) die "Unsupported VERIFY_PURPOSE: $VERIFY_PURPOSE" ;;
@@ -91,7 +102,7 @@ esac
 if [[ "$VERIFY_MODE" == strict ]]; then
   [[ "$identity_count" == 1 && -n "${VERIFY_PURPOSE:-}" && "$VERIFY_PURPOSE" != any ]] || die "VERIFY_MODE=strict requires one expected identity and a specific VERIFY_PURPOSE"
   VERIFY_CRL=1
-  info "Strict verification: full-chain CRLs, expected SAN identity and application purpose required"
+  info "Strict verification: full-chain CRLs, expected identity and application purpose required"
 fi
 
 info "Using intermediate: ${CA_DIR}"
@@ -132,14 +143,30 @@ INT_CRT="$ISSUER_CERT"
 case "$VERIFY_MODE" in normal|tolerate_revoked|info|strict) ;; *) die "Unknown VERIFY_MODE: $VERIFY_MODE" ;; esac
 [[ "$VERIFY_CRL" == 0 || "$VERIFY_CRL" == 1 ]] || die "VERIFY_CRL must be 0 or 1"
 args=( -auth_level 2 -CAfile "$ROOT_CRT" -no-CApath -untrusted "$INT_CRT" )
+[[ -z "${VERIFY_ATTIME:-}" ]] || args+=(-attime "$VERIFY_ATTIME")
 [[ -z "${VERIFY_PURPOSE:-}" ]] || args+=(-purpose "$VERIFY_PURPOSE")
 case "$identity_type" in
   DNS) args+=(-verify_hostname "$identity_value") ;;
   IP) args+=(-verify_ip "$identity_value") ;;
   EMAIL) args+=(-verify_email "$identity_value") ;;
 esac
+case "$identity_type" in
+  URI)
+    decoded_sans="$(san_names certificate "$FILE")" || die "Cannot decode certificate SANs"
+    printf '%s\n' "$decoded_sans" | PKI_EXPECTED_URI="$identity_value" awk '
+      $0 == "URI:" ENVIRON["PKI_EXPECTED_URI"] {found=1}
+      END {exit !found}
+    ' || die "Certificate URI identity mismatch"
+    ;;
+  SUBJECT)
+    decoded_subject="$("$OPENSSL" x509 -in "$FILE" -noout -subject -nameopt RFC2253)" || die "Cannot decode certificate subject"
+    [[ "${decoded_subject#subject=}" == "$identity_value" ]] || die "Certificate subject identity mismatch"
+    ;;
+esac
 if [[ "$VERIFY_MODE" == strict ]]; then
   args+=(-x509_strict -check_ss_sig)
+fi
+if [[ "$VERIFY_MODE" == strict && "$identity_type" != SUBJECT ]]; then
   # Require the requested identity type in SAN; strict mode never relies on CN.
   identity_prefix="$identity_type"; [[ "$identity_type" != EMAIL ]] || identity_prefix=email
   decoded_sans="$(san_names certificate "$FILE")" || die "Cannot decode certificate SANs"
@@ -149,13 +176,13 @@ if [[ "$VERIFY_MODE" == strict ]]; then
   ' || die "Strict verification requires a $identity_type SAN"
 fi
 bundle=""
-trap '[[ -z "$bundle" ]] || rm -f "$bundle"; release_locks' EXIT
+trap 'rc=$?; [[ -z "$bundle" ]] || rm -f "$bundle"; pki_exit "$rc"' EXIT
 if [[ "$VERIFY_CRL" == 1 ]]; then
   int_crl="$ROOT_DIR/$CA_DIR/crl/ca.crl.pem"
   if [[ "$ISSUER_ID" != "$(certificate_id certs/ca.cert.pem)" ]]; then int_crl="$ROOT_DIR/$CA_DIR/generations/$ISSUER_ID/ca.crl.pem"; fi
   int_crl="$(authority_path "$CA_DIR" "$int_crl")"
   root_crl="$ROOT_DIR/root/crl/ca.crl.pem"
-  if ! validate_crl "$int_crl" "$INT_CRT" || ! validate_crl "$root_crl" "$ROOT_CRT"; then
+  if ! validate_crl "$int_crl" "$INT_CRT" "$verification_time" || ! validate_crl "$root_crl" "$ROOT_CRT" "$verification_time"; then
     info "VERIFY STATUS: ERROR"
     die "Requested CRL coverage unavailable or invalid; both issuer and root CRLs are required"
   fi

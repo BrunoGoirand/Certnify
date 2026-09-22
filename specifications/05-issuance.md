@@ -111,14 +111,18 @@ Historical leaves retain their original cryptographic issuer binding.
    mismatch leaves committed history and a pending journal, without installation.
    Persist issuer binding and policy reference. Select a free canonical or
    `srl-<serial>-<stem>` certificate destination; never overwrite an occupied serial
-   destination. Check the issued pair. With FORCE_NEW_KEY=1, install the new
-   key, CSR and certificate under the serial namespace, including on first issuance.
-8. For rotate, rename key/CSR/certificate into the serial namespace. Build the
-   leaf+intermediate fullchain and verify against the workspace root. With
-   FORCE_NEW_KEY=1, then copy the serial-named key, CSR, certificate and fullchain
-   to their conventional paths, check the canonical pair and complete the journal.
-   Individual replacements are not a multi-file transaction; interruption leaves
-   recovery pending. No failed post-check undoes the issuance database commit.
+   destination. Check the issued pair, equality with retained newcerts evidence,
+   and the chain against the workspace root before publishing deployment files.
+8. Build the leaf+intermediate fullchain and a sealed installation plan. For rotate
+   or FORCE_NEW_KEY=1, retain the key, CSR and certificate in the serial namespace.
+   For FORCE_NEW_KEY=1, also replace all four conventional paths from the same
+   verified bytes, including on first issuance. Remove temporary key/CSR files only
+   after their replacements are installed. The plan records source/destination
+   hashes, issuer/index/serial guards and the certificate validity deadline.
+   Completed plans are retained as private receipts. A fully prepared interrupted
+   installation can be resumed explicitly or via AUTO_RECOVER=1, without signing
+   again. An interruption before sealing still needs manual review. Individual
+   replacements are not a multi-file transaction and never undo issuance commits.
 
 ## Results for another implementation
 

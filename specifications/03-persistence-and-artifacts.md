@@ -6,8 +6,12 @@
 workspace/
   profiles/                       profile templates, including root/base.cnf
   .locks/root-ca.lock/pid         workspace lock ownership hint
+  .recovery/power-loss            durable in-flight command fence (JSON)
+  .recovery/power-loss-error      persistence-error latch, when writable
+  .recovery/power-loss-reviewed-<id>  explicit review receipt
   .recovery/pending/              interrupted-operation journal
   .recovery/reviewed-<id>/         acknowledged recovery record
+  .recovery/completed-<id>/        verified installation receipt (private artifacts)
   root/
     openssl.cnf
     ca.meta

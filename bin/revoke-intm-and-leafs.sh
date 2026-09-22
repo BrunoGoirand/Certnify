@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=bin/pki-env.sh
 source "${SCRIPT_DIR}/pki-env.sh"
 normalize_revocation_reason
+[[ "$REASON" != removeFromCRL ]] || die "Release holds individually with revoke or revoke-intermediate; bulk unrevocation is not supported"
 pki_plan_or_begin
 
 OPENSSL="${OPENSSL:-openssl}"
@@ -120,7 +121,7 @@ pki_records validate "$INT_INDEX" >/dev/null
 
 # Freeze selected rows before any mutation. Preflight all historical signers.
 PLAN="$(mktemp)"
-trap 'rm -f "$PLAN"; release_locks' EXIT
+trap 'rc=$?; rm -f "$PLAN"; pki_exit "$rc"' EXIT
 awk -F '\t' 'BEGIN{OFS=sprintf("%c",31)} $1~/^[VRE]$/{print $1,$4,$5}' "$INT_INDEX" > "$PLAN"
 total=0; ok=0; ko=0; planned=0; completed=0
 [[ "$DRY_RUN" == 0 || "$DRY_RUN" == 1 ]] || die "DRY_RUN must be 0 or 1"
@@ -238,7 +239,11 @@ DISABLED_FLAG="${ROOT_DIR}/${DIR}/.disabled"
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
   echo "[DRY] touch '$DISABLED_FLAG'"
 else
-  : > "$DISABLED_FLAG"
+  if [[ ! -e "$DISABLED_FLAG" ]]; then
+    if [[ "$REASON" == certificateHold && "$parent_status" != R ]]; then
+      printf 'certificateHold:%s\n' "$(certificate_id "$INT_CERT")" > "$DISABLED_FLAG"
+    else : > "$DISABLED_FLAG"; fi
+  fi
 fi
 info "Issuance disabled for ${DIR}: created ${DISABLED_FLAG}"
 

@@ -82,6 +82,7 @@ staged_link "$(basename "$CRL_PEM")" "$LATEST_PEM"
 staged_link "$(basename "$CRL_DER")" "$LATEST_DER"
 report="$CRL_PEM.publication"
 printf 'attempt=%s\nlocal=complete\n' "$(date -u +%FT%TZ)" >> "$report"
+durability_flush || die "Cannot persist local CRL before remote publication"
 if [[ -n "${PUBLISH_CMD:-}" ]]; then
   failed=0
   cd "$output_dir"

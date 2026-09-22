@@ -1,3 +1,39 @@
+> Complément du 21 septembre 2026 — résistance aux coupures : le protocole logiciel
+> est implémenté. Un marqueur durable précède les modifications ; les barrières de
+> persistance couvrent l’état local, y compris les index et compteurs OpenSSL.
+> Après interruption, seules les installations disposant d’un point de reprise
+> durable et vérifié peuvent reprendre ; les autres cas restent bloqués pour revue.
+> Python 3.8+ devient une dépendance d’exécution. Validation : **115 tests distincts
+> réussis** dans les suites 0 à 11, dont les 13 tests de durabilité, avec relances
+> ciblées après les derniers ajustements. Le smoke a également réussi avant ces
+> derniers ajustements, couverts par les tests ciblés. Syntaxe, manifeste, liens
+> locaux et diff vérifiés. Les coupures matérielles réelles et Linux restent à qualifier.
+> Voir la [validation de durabilité](specifications/10-acceptance-and-traceability.md#durability-validation-2026-09-21)
+> et le [guide de reprise](specifications/guides/recovery-fr.md).
+
+> Complément du 21 septembre 2026 — maintenance : la levée individuelle de
+> `certificateHold`, la reprise des installations vérifiées (`AUTO_RECOVER=1` ou
+> `RECOVERY_ACTION=resume`) et le rattachement d’un workspace déplacé hors ligne
+> (`RECOVERY_ACTION=relocate`, prévisualisation puis `RELOCATE_APPLY=1`) sont implémentés.
+> Les signatures incertaines, plans incomplets, verrous abandonnés et opérations
+> sans plan de reprise pris en charge exigent encore un examen manuel.
+> Les journaux terminés peuvent conserver des copies privées de clés ; ils restent
+> protégés par permissions et exclus de Git. Voir le [guide de reprise](specifications/guides/recovery-fr.md).
+> Validation actuelle : **101 cas de test distincts réussis** dans les suites 0 à 10,
+> avec relances ciblées après ajustements. Contrôles de syntaxe Bash/Python,
+> manifeste des sources, liens documentaires relatifs et diff réussis. Le smoke
+> n’a pas été relancé ; aucune PKI réelle, coupure électrique ni plateforme distante
+> n’a été testée. Voir la [traçabilité](specifications/10-acceptance-and-traceability.md#maintenance-validation-2026-09-21).
+
+> Complément du 21 septembre 2026 — migration : la réémission par lot conserve
+> désormais le sujet complet, les SAN, le profil effectif et les paramètres des
+> clés à partir de sources vérifiées. Elle génère de nouvelles clés et refuse
+> les métadonnées manquantes ou les profils incompatibles avant émission.
+> Le comportement limité au CN exige `REISSUE_MODE=cn-only`.
+> Validation actuelle : 40 scénarios distincts réussis sur des PKI temporaires,
+> syntaxe Bash/Python et contrôle du diff réussis. La suite exhaustive et le smoke
+> n’ont pas été relancés. Voir la [trace de validation](specifications/10-acceptance-and-traceability.md#preserving-migration-validation-2026-09-21).
+
 > Mise à jour du 21 septembre 2026 : les quatre défauts ci-dessous sont corrigés.
 > Les CRL obsolètes ne peuvent plus être reprises ; les archives restent intactes
 > et les PEM/DER courants concordent ; le remplacement forcé publie un ensemble
@@ -6,7 +42,7 @@
 > La suite complète n’a pas été relancée. Les anciennes CRL finales sans état de
 > reprise doivent être régénérées. Voir la [validation détaillée](specifications/10-acceptance-and-traceability.md).
 >
-> Le texte qui suit conserve les constats et la validation de l’audit initial ;
+> Hors complément migration ci-dessus, le texte conserve les constats de l’audit initial ;
 > ses défauts et références de lignes décrivent l’état antérieur aux corrections.
 
 Certnify est un outil local de gestion d’une **PKI privée** : création des autorités, émission, vérification, révocation et renouvellement des certificats via Bash/Make et OpenSSL.
@@ -28,15 +64,15 @@ La solution ne couvre pas une exploitation PKI complète. Les sujets absents son
 - Renouvellement planifié, supervision, alertes d’expiration, déploiement des certificats et installation de la confiance.
 - Serveur OCSP, distribution automatique des CRL et configuration standard des points AIA/CDP.
 - HSM, clés chiffrées, gestion des secrets, rôles applicatifs et séparation des responsabilités.
-- Sauvegarde/restauration intégrée, haute disponibilité, transactions durables et coordination entre plusieurs machines.
+- Sauvegarde/restauration intégrée, haute disponibilité, transactions multifichiers atomiques et coordination entre plusieurs machines.
 - Rotation de la racine, intégration aux autorités publiques, Certificate Transparency et export PKCS#12.
 - Signature effective des logiciels/documents, chiffrement des messages et service d’horodatage : seuls les certificats correspondants sont produits.
 
 Même dans son périmètre, certains cas restent non couverts :
 
-- Migration conservant intégralement sujet, SAN, profil et politique de clés : la réémission par lot est limitée au CN.
-- Levée d’une suspension `certificateHold`, récupération automatique après incident et déplacement arbitraire du workspace.
-- Vérification d’identité URI, vérification à une date historique et mode strict adapté aux certificats sans identité DNS/IP/email.
+- Migration de certificats sans certificat source ou sans profil archivé : le mode conservateur refuse ces cas. La réémission conserve désormais le sujet, les SAN, le profil effectif et les paramètres cryptographiques pour les sources vérifiables ; le mode limité au CN reste une option explicite. Les politiques externes de stockage des clés (HSM, chiffrement) restent hors périmètre.
+- Récupération d’un résultat de signature incertain, des opérations sans plan complet et des verrous abandonnés ; déplacement du workspace en cours d’utilisation. La levée individuelle de `certificateHold`, la reprise des installations vérifiées et le rattachement explicite d’un workspace déplacé hors ligne sont désormais implémentés.
+- Reconstitution automatique de la confiance et des preuves de révocation historiques. La vérification URI exacte, la date de référence explicite (`VERIFY_ATTIME`) et le mode strict avec sujet RFC2253 attendu (`VERIFY_SUBJECT`) sont désormais disponibles ; les CRL couvrant la date choisie doivent être conservées.
 - Ensemble des syntaxes internationales DN/SAN, hiérarchies avec plusieurs niveaux d’intermédiaires et qualification de toutes les plateformes/OpenSSL acceptés.
 
 Au-delà des bogues, plusieurs limites de sécurité doivent être prises en compte :
@@ -44,7 +80,7 @@ Au-delà des bogues, plusieurs limites de sécurité doivent être prises en com
 - Les clés privées non chiffrées reposent entièrement sur la protection du poste et du système de fichiers.
 - La vérification par défaut contrôle la chaîne, sans imposer révocation, identité attendue et usage. Ces contrôles doivent être explicitement exigés selon l’application. [Référence OpenSSL](https://docs.openssl.org/3.3/man1/openssl-verification-options/)
 - Les catégories `web`, `code`, etc. ne constituent pas un cloisonnement cryptographique : prévoir des contraintes d’émission si cette séparation est recherchée.
-- Le verrouillage et les journaux protègent les opérations du toolkit, sans garantir l’intégrité face aux écritures externes, à une coupure électrique ou à une altération volontaire.
+- Toute écriture de l’état PKI doit passer par le toolkit : les écritures externes sont interdites par le contrat d’exploitation (spécifications, chapitre 01). Leur exclusion exige un cloisonnement des accès système ; le verrouillage actuel ne l’impose pas à un processus disposant des mêmes droits. Le protocole logiciel de résistance aux coupures est implémenté : marqueur durable avant modification, barrières de persistance et reprise limitée aux plans durablement préparés. Une interruption incertaine bloque les nouvelles opérations. Il ne fournit ni réparation automatique des index OpenSSL, ni protection contre une altération volontaire ; les coupures matérielles réelles restent à qualifier (chapitre 08).
 
 L’implémentation possède néanmoins de bonnes protections : contrôle des clés, validation des entrées, verrouillage commun, conservation des émetteurs historiques et blocage après émission incertaine.
 

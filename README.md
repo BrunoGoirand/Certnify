@@ -21,13 +21,17 @@ credentials; it does not itself serve TLS, sign documents or run a timestamp ser
 - Intermediate kinds `web`, `auth`, `code`, `smime` and `archive`, plus custom authorities.
 - Exact CN selection, duplicate-active-CN protection and retained issuer generations.
 - Chain verification, strict optional CRL coverage, single/bulk revocation and CRL generation.
-- Intermediate rollover/rollback, inventory export and explicitly CN-only batch reissuance.
+- Intermediate rollover/rollback, inventory export and policy-preserving batch reissuance.
 - Shared workspace locking, interrupted-operation reporting and resumable CRL publication.
 
 This is an administrator-operated filesystem toolkit. It has no enrollment server,
 ACME service, renewal scheduler, OCSP responder, trust-store installer or HSM interface.
 Private keys are unencrypted files with restrictive permissions. There is no
-multi-file transaction, automatic crash repair or power-loss durability guarantee.
+atomic multi-file transaction or arbitrary crash repair. A durable command fence
+and checked persistence barriers protect local operations: an abrupt interruption
+blocks further operations until verified resumption or explicit review. Actual
+hardware power-cut behavior remains unqualified. Verified installation plans can
+be resumed without signing again; see the [recovery guide](specifications/guides/recovery-en.md).
 
 ## Requirements
 
@@ -37,8 +41,11 @@ The backend gate accepts OpenSSL 1.1.1 or 3.x and rejects LibreSSL. Select anoth
 executable with `OPENSSL=/absolute/path/to/openssl`.
 
 The qualified environment is macOS, Bash 3.2.57, GNU Make 3.81 and OpenSSL 3.6.4.
-Other accepted versions/platforms are not thereby qualified. Tests additionally
-require Python 3.8+; the recorded test environment uses Python 3.14.7.
+Other accepted versions/platforms are not thereby qualified. Python 3.8+ is required
+at runtime for persistence barriers as well as for tests; the recorded environment
+uses Python 3.14.7. The durability helper supports macOS and Linux, fails closed
+on unsupported barriers, and requires a single local filesystem. External writers,
+including synchronization agents modifying live PKI files, are prohibited.
 
 ## Quick start
 
@@ -152,8 +159,17 @@ make revoke KIND=web CN="app.example.test" REASON=keyCompromise
 CN lookup requires one exact active match, or one unambiguous historical match.
 Use FILE when ambiguous; revocation also accepts SERIAL. A nonempty CHAIN override
 is rejected. Verification uses the certificate's bound issuer generation and workspace
-root. Add one of `VERIFY_DNS`, `VERIFY_IP`, or `VERIFY_EMAIL` for an expected
+root. Add one of `VERIFY_DNS`, `VERIFY_IP`, `VERIFY_EMAIL`, `VERIFY_URI`, or `VERIFY_SUBJECT` for an expected
 identity, and `VERIFY_PURPOSE` for the application purpose.
+
+`VERIFY_URI` compares the complete URI SAN exactly (case-sensitive, no URI
+normalization). `VERIFY_SUBJECT` compares the complete subject exactly as printed
+by `openssl x509 -in cert.pem -noout -subject -nameopt RFC2253`, without `subject=`.
+It supports certificates without SANs; it does not uniquely pin a certificate.
+`VERIFY_ATTIME` selects nonnegative Unix seconds (UTC, through year 9999).
+Certificate and CRL validity use that same reference time. Supply retained CRLs
+covering that time; this does not reconstruct historical trust or prove signing time.
+URI/subject mismatch is a preflight failure in every mode.
 
 `VERIFY_CRL=1` requires valid root **and** issuer CRLs, including the historical
 issuer CRL when applicable. Missing, stale or invalid required CRLs fail.
@@ -168,7 +184,7 @@ issuer CRL when applicable. Missing, stale or invalid required CRLs fail.
 Preflight errors fail in every mode. In info mode, read `VERIFY STATUS`; exit zero
 is not proof of validity. Default verification does not check revocation.
 
-For automation, `VERIFY_MODE=strict` requires one expected SAN identity and a
+For automation, `VERIFY_MODE=strict` requires one expected identity (SAN or explicit subject) and a
 specific purpose, enforces strict X.509 validation and full-chain CRL coverage,
 and returns nonzero on any failure. `VERIFY_CRL=0` cannot disable strict coverage.
 For example, after renewing the required CRLs:
@@ -201,7 +217,20 @@ Required item failures produce a nonzero aggregate result; committed revocations
 are retained. Make revocation targets default CRL_UPDATE to 1; use 0 to omit refresh.
 Repeating revocation preserves its original date/reason and can retry CRL refresh.
 Supported reasons and mappings are in the [revocation contract](specifications/06-verification-and-revocation.md).
-Release from hold (`removeFromCRL`) is unsupported.
+Release only a `certificateHold` suspension with the existing targets:
+
+```sh
+make revoke KIND=web SERIAL=1000 REASON=removeFromCRL DRY_RUN=1
+make revoke KIND=web SERIAL=1000 REASON=removeFromCRL
+make revoke-intermediate KIND=web REASON=removeFromCRL
+```
+
+Release requires `CRL_UPDATE=1` and publishes a new complete CRL without that
+entry; it never emits `removeFromCRL` in a complete CRL. Permanent revocations
+cannot be undone. Distribute the new CRL: clients may retain the previous one
+until refresh. An expired certificate stays expired. Bulk release is rejected;
+release each intended certificate explicitly. Independent `.disabled` markers
+are retained; only a marker created for this intermediate's hold is removed.
 
 `crl-root` uses configured CRL validity, normally seven days; CRL_DAYS controls
 intermediate generation. `crl-all` includes matching legacy directories and excludes
@@ -230,8 +259,16 @@ Rollover preserves the previous authority directory and creates a new active one
 it does not revoke or migrate old certificates. Rollback preserves the current
 active directory before restoring a legacy one; it does not undo revocation.
 Inventory and batch commands accept explicit source/input/destination selectors.
-Batch reissuance is **CN-only**, not lossless migration of subject, SANs, profiles or
-keys. Per-item receipts block blind retries after uncertain results. See the
+Batch reissuance defaults to **preserve**: original certificates and archived
+profile records in `LEGACY_DIR` supply the full subject, SANs, effective profile
+and key parameters. Fresh keys are generated with the same algorithm, RSA size
+or EC curve; old private keys are not needed. Every row is checked before issuing,
+including in `DRY_RUN=1`. Missing evidence or incompatible profiles fail closed.
+Issuer, serial number, SKI/AKI and validity are renewed; `DAYS` still selects the
+new lifetime within the chain limits. This mode requires OpenSSL 3.x.
+For reviewed lossy reissuance from a TSV alone, use `REISSUE_MODE=cn-only`.
+Custom `ISSUE_CMD` commands have no preservation guarantee.
+Per-item receipts block blind retries after uncertain results. See the
 [lifecycle specification](specifications/07-lifecycle-and-migration.md).
 
 Final CRL preparation/publication is a direct script operation:
@@ -264,7 +301,19 @@ Ordinary safe CNs retain their names, including spaces/@. Unsafe or reserved nam
 use a digest stem and exact CN map; subsequent certificates can use serial-based
 names. See the [storage specification](specifications/03-persistence-and-artifacts.md).
 Custom data locations should use `pki-data/` or an explicit local Git exclusion.
-Configurations contain absolute bindings; moving a workspace requires reviewed rebinding.
+After moving an intact, inactive workspace, preview and apply configuration
+rebinding from its new location:
+
+```sh
+RECOVERY_ACTION=relocate bin/recovery.sh
+RECOVERY_ACTION=relocate RELOCATE_APPLY=1 bin/recovery.sh
+```
+
+This discovers root, nested and historical authorities, preserves custom policy,
+updates internal absolute aliases and retains all keys, indexes and counters.
+Resolve pending operations before relocation. External aliases, missing state,
+unsupported paths and configuration includes are refused; concurrent use of the
+old workspace is outside this operation's scope.
 
 An existing authority with missing database/counters is refused without recreating
 state. Restore and reconcile its retained files explicitly; never reset counters.
@@ -279,8 +328,17 @@ can leave `.recovery/pending`, which blocks further locked operations until revi
 bin/recovery.sh
 ```
 
-This report is read-only. Reconciliation and acknowledgment are explicit operator
-actions, not automatic repair. Never reset consumed serials or blindly repeat signing.
+This report is read-only. A fully prepared installation can be completed with
+`RECOVERY_ACTION=resume bin/recovery.sh`, or automatically before the next locked
+command by setting `AUTO_RECOVER=1`. This covers validated leaf installation,
+hold-release publication and workspace rebinding. Every saved source, destination,
+state guard and validity deadline is rechecked; recovery never signs a certificate
+or resets a counter. Completed private journals are retained as receipts and may
+contain private key copies with restrictive permissions.
+
+An uncertain signing result, an incomplete plan, an interrupted authority rollover,
+a stale lock, or changed evidence still requires explicit reconciliation and
+acknowledgment. There is no automatic rollback or lock stealing.
 A failed CRL refresh/publication does not undo a local revocation or generated CRL.
 The [reliability contract](specifications/08-architecture-and-reliability.md) describes
 commit boundaries, stale locks and manual recovery.
@@ -291,7 +349,7 @@ commit boundaries, stale locks and manual recovery.
 make help
 make tree
 make ls-web
-make test-stage0 test-stage1 test-stage2 test-stage3 test-stage4 test-stage5 test-stage6 test-stage7 test-stage8
+make test-stage0 test-stage1 test-stage2 test-stage3 test-stage4 test-stage5 test-stage6 test-stage7 test-stage8 test-stage9 test-stage10
 make test-smoke
 ```
 

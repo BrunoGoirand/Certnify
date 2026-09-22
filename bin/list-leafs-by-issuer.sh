@@ -76,7 +76,7 @@ fi
 
 # Validate the entire selection before publishing or replacing an inventory.
 TMP_LIST="$(mktemp)"
-trap 'rm -f "$TMP_LIST"; release_locks' EXIT
+trap 'rc=$?; rm -f "$TMP_LIST"; pki_exit "$rc"' EXIT
 INCLUDE_REVOKED="$INCLUDE_REVOKED" INCLUDE_EXPIRED="$INCLUDE_EXPIRED" \
   pki_records list "$INDEX" > "$TMP_LIST"
 info "Listing from index: $INDEX" >&2

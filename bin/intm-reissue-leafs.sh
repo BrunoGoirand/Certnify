@@ -18,6 +18,7 @@ pki_plan_or_begin
 #   LEGACY_DIR=...                         (optionnel; auto si vide)
 #   ACTIVE_DIR=intm-${KIND}-ca             (auto)
 #   ISSUE_CMD='SAN="DNS:$CN" DAYS=397 bin/gen-server.sh' (trusted shell command)
+#   REISSUE_MODE=preserve|cn-only       (default: preserve; requires source evidence)
 #   DRY_RUN=0|1
 #   COL_SERIAL=1  COL_EXPIRES=2  COL_CN=3
 # ------------------------------------------------------------------
@@ -167,7 +168,17 @@ case "${ISSUE_CMD:-}" in
     die 'ISSUE_CMD placeholders are unsupported; use quoted "$CN", "$SERIAL", "$EXPIRES", and "$ACTIVE_DIR" environment variables' ;;
 esac
 [[ "$DRY_RUN" == 0 || "$DRY_RUN" == 1 ]] || die "DRY_RUN must be 0 or 1"
-warn "Reissuance mode: legacy CN-only; original subject, SANs, extensions and validity are not preserved."
+REISSUE_MODE="${REISSUE_MODE:-preserve}"
+case "$REISSUE_MODE" in preserve|cn-only) ;; *) die "REISSUE_MODE must be preserve or cn-only" ;; esac
+if [[ -n "${ISSUE_CMD:-}" ]]; then
+  warn "Reissuance mode: custom command; preservation is the command author responsibility."
+elif [[ "$REISSUE_MODE" == cn-only ]]; then
+  warn "Reissuance mode: legacy CN-only; original subject, SANs, extensions and key policy are not preserved."
+else
+  [[ -n "${LEGACY_DIR:-}" ]] || die "Preserving migration requires LEGACY_DIR (selected automatically after rollover)"
+  source "$ROOT_DIR/bin/pki-migration.sh"
+  info "Reissuance mode: preserve subject, SANs, profile and key parameters; generate fresh private keys."
+fi
 
 # ---------- 6) Sanity checks ----------
 [[ -f "${ACTIVE_DIR}/certs/ca.cert.pem" ]]   || die "Cert intermédiaire actif manquant: ${ACTIVE_DIR}/certs/ca.cert.pem"
@@ -175,16 +186,27 @@ warn "Reissuance mode: legacy CN-only; original subject, SANs, extensions and va
 
 # Validate every row before executing any command. Non-whitespace separators
 # preserve empty TSV columns; unsupported/malformed input fails as a whole.
+source_plan=""
 PARSED_INPUT="$(mktemp)"
-trap 'rm -f "$PARSED_INPUT"; release_locks' EXIT
+trap 'rc=$?; rm -f "$PARSED_INPUT" "${source_plan:-}"; pki_exit "$rc"' EXIT
 COL_SERIAL="$COL_SERIAL" COL_EXPIRES="$COL_EXPIRES" COL_CN="$COL_CN" \
   pki_records inventory "$INPUT" > "$PARSED_INPUT"
 check_config "$ACTIVE_DIR"
 export CERTNIFY_EXPECTED_ISSUER="$(certificate_id "$ACTIVE_DIR/certs/ca.cert.pem")"
+# Validate the complete source selection and destination policy before any claim.
+if [[ "$REISSUE_MODE" == preserve && -z "${ISSUE_CMD:-}" ]]; then
+  INT_CNF="$ROOT_DIR/$ACTIVE_DIR/openssl.cnf"
+  source_plan="$(mktemp)"
+  while IFS=$'\x1F' read -r serial expires cn; do
+    source_id="$( set -e; migration_load "$LEGACY_DIR" "$serial" "$cn" "$expires"; migration_preflight; certificate_id "$MIGRATION_CERT" )"
+    printf '%s\037%s\037%s\037%s\n' "$serial" "$expires" "$cn" "$source_id" >> "$source_plan"
+  done < "$PARSED_INPUT"
+  mv "$source_plan" "$PARSED_INPUT"
+fi
 release_locks
 total=0; ok=0; ko=0; planned=0; completed=0
 
-while IFS=$'\x1F' read -r serial expires cn; do
+while IFS=$'\x1F' read -r serial expires cn source_id; do
   total=$((total + 1))
   export ACTIVE_DIR LEGACY_DIR
   if [[ "$DRY_RUN" == 1 ]]; then
@@ -196,10 +218,16 @@ while IFS=$'\x1F' read -r serial expires cn; do
   # Claim under the workspace lock, release it before the child transaction.
   # A failed/abandoned attempt requires review, never an automatic retry.
   pki_begin
-  trap 'rm -f "$PARSED_INPUT"; release_locks' EXIT
+  trap 'rc=$?; rm -f "$PARSED_INPUT" "${source_plan:-}"; pki_exit "$rc"' EXIT
   check_config "$ACTIVE_DIR"
   [[ "$(certificate_id "$ACTIVE_DIR/certs/ca.cert.pem")" == "$CERTNIFY_EXPECTED_ISSUER" ]] || die "Active issuer changed during batch"
-  item_id="$(printf '%s\n' "$CERTNIFY_EXPECTED_ISSUER" "$LEGACY_DIR" "$serial" "$expires" "$cn" | "$OPENSSL" dgst -sha256 | awk '{print $NF}')"
+  # Keep historical receipt IDs for compatibility/custom commands. A preserving
+  # attempt has a distinct identity so an old CN-only success cannot satisfy it.
+  item_id="$(
+    { printf '%s\n' "$CERTNIFY_EXPECTED_ISSUER" "$LEGACY_DIR" "$serial" "$expires" "$cn"
+      if [[ -n "${source_id:-}" ]]; then printf 'preserve\n%s\n' "$source_id"; fi
+    } | "$OPENSSL" dgst -sha256 | awk '{print $NF}'
+  )"
   receipt="$(authority_path "$ACTIVE_DIR" "reissues/$item_id")"
   if [[ -e "$receipt" ]]; then
     state="$(cat "$receipt")"
@@ -220,6 +248,10 @@ while IFS=$'\x1F' read -r serial expires cn; do
   rc=0
   if [[ -n "${ISSUE_CMD:-}" ]]; then
     CN="$cn" SERIAL="$serial" EXPIRES="$expires" INT_DIR="$ACTIVE_DIR" bash -c "$ISSUE_CMD" || rc=$?
+  elif [[ "$REISSUE_MODE" == preserve ]]; then
+    CN="$cn" SERIAL="$serial" EXPIRES="$expires" INT_DIR="$ACTIVE_DIR" \
+      CERTNIFY_MIGRATION_SOURCE="$LEGACY_DIR" CERTNIFY_SOURCE_ID="$source_id" \
+      DAYS="${DAYS:-$DEFAULT_DAYS}" "$ISSUE_SCRIPT" || rc=$?
   else
     row_san=""
     case "$KIND" in
@@ -230,7 +262,7 @@ while IFS=$'\x1F' read -r serial expires cn; do
       SAN="$row_san" DAYS="${DAYS:-$DEFAULT_DAYS}" "$ISSUE_SCRIPT" || rc=$?
   fi
   pki_begin
-  trap 'rm -f "$PARSED_INPUT"; release_locks' EXIT
+  trap 'rc=$?; rm -f "$PARSED_INPUT" "${source_plan:-}"; pki_exit "$rc"' EXIT
   # A concurrent lifecycle move may have moved the receipt. Do not recreate it
   # in a new active authority: leave the retained started receipt for review.
   [[ "$(certificate_id "$ACTIVE_DIR/certs/ca.cert.pem")" == "$CERTNIFY_EXPECTED_ISSUER" && -f "$receipt" ]] || die "Authority moved during batch; inspect retained attempt before retry"

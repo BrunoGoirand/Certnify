@@ -36,20 +36,20 @@ class Commands(unittest.TestCase):
 
     def test_make_empty_dry_run_and_active_override(self):
         self.inventory()
-        self.make('reissue-leafs-web', 'INPUT=unusual.tsv')
+        self.make('reissue-leafs-web', 'REISSUE_MODE=cn-only', 'INPUT=unusual.tsv')
         target = self.work / 'pki-data/alternate'
         self.make('intermediate', 'INT_DIR=' + str(target), 'CN=Alternate Web')
         self.inventory('batch.example')
         before = snapshot(self.work)
-        r = self.make('reissue-leafs-web', 'INPUT=unusual.tsv', 'ACTIVE_DIR=' + str(target), 'DRY_RUN=1')
+        r = self.make('reissue-leafs-web', 'REISSUE_MODE=cn-only', 'INPUT=unusual.tsv', 'ACTIVE_DIR=' + str(target), 'DRY_RUN=1')
         self.assertIn('status=planned', r.stdout)
         self.assertEqual(before, snapshot(self.work))
         untouched = snapshot(self.work / 'intm-web-ca')
-        self.make('reissue-leafs-web', 'INPUT=unusual.tsv', 'ACTIVE_DIR=' + str(target))
+        self.make('reissue-leafs-web', 'REISSUE_MODE=cn-only', 'INPUT=unusual.tsv', 'ACTIVE_DIR=' + str(target))
         self.assertTrue((target / 'certs/batch.example.cert.pem').exists())
         self.assertEqual(untouched, snapshot(self.work / 'intm-web-ca'))
         before = snapshot(target)
-        r = self.make('reissue-leafs-web', 'INPUT=unusual.tsv', 'ACTIVE_DIR=' + str(target))
+        r = self.make('reissue-leafs-web', 'REISSUE_MODE=cn-only', 'INPUT=unusual.tsv', 'ACTIVE_DIR=' + str(target))
         self.assertIn('status=already_completed', r.stdout)
         self.assertEqual(before, snapshot(target))
 

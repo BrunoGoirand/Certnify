@@ -1,10 +1,18 @@
 # Certnify state/path/generation helpers. Sourced by pki-env.sh (MIT).
 # One physical-workspace lock intentionally serializes every PKI transaction.
 pki_begin() {
+  local access="${1:-write}"
+  case "$access" in read|write) ;; *) die "Invalid transaction access mode: $access" ;; esac
   cd "$ROOT_DIR"
   acquire_lock root-ca
   trap 'pki_exit "$?"' EXIT
   recovery_guard
+  durability_guard
+  # Readers need admission checks, but no new write transaction. Inventory
+  # export and batch receipt creation do mutate the workspace and are fenced.
+  if [[ "$access" == write ]]; then
+    durability_begin || die "Cannot establish durable operation intent"
+  fi
   trap 'exit 130' INT
   trap 'exit 143' TERM
 }
@@ -19,7 +27,15 @@ workspace_path() {
   case "/$raw/" in */../*) die "Path must stay within the workspace (no '..'): $raw" ;; esac
   [[ "$raw" == /* ]] || raw="$ROOT_DIR/$raw"
   resolved="$(canonicalize_path_allow_missing "$raw")" || return 1
-  case "$resolved" in "$ROOT_DIR"/*) printf '%s\n' "$resolved" ;; *) die "Path resolves outside workspace: $raw -> $resolved" ;; esac
+  case "$resolved" in "$ROOT_DIR"/*) ;; *) die "Path resolves outside workspace: $raw -> $resolved" ;; esac
+  # These paths are excluded from persistence scans and must never hold CA data.
+  case "${resolved#"$ROOT_DIR/"}" in
+    .git|.git/*|.locks|.locks/*) die "Reserved non-PKI path: $resolved" ;;
+  esac
+  if grep -Fxq -- "${resolved#"$ROOT_DIR/"}" "$ROOT_DIR/test/source-manifest.txt"; then
+    die "Distribution source cannot be used as operational PKI state: $resolved"
+  fi
+  printf '%s\n' "$resolved"
 }
 
 resolve_authority() {

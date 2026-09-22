@@ -55,6 +55,11 @@ bin/pki-policy.sh
 bin/pki-san.awk
 test/stage5.py
 bin/pki-recovery.sh
+bin/pki-durable.sh
+bin/pki-durable.py
+bin/pki-resume.sh
+bin/pki-hold.sh
+bin/pki-relocate.sh
 bin/recovery.sh
 test/stage6.py
 specifications/01-scope-and-domain.md
@@ -84,3 +89,8 @@ bin/pki-time.awk
 bin/pki-clean.sh
 bin/pki-crl-history.sh
 test/stage8.py
+
+bin/pki-migration.sh
+test/stage9.py
+test/stage10.py
+test/stage11.py

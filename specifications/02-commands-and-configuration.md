@@ -70,8 +70,17 @@ storage paths to the selected authority. Includes and unsupported path overrides
 are rejected rather than evaluated. Operator extension/policy settings are not
 reconstructed from templates. Rollover and rollback validate the old binding,
 stage the path rewrite, then validate the new binding. A relocated workspace with
-stale absolute bindings is rejected; automatic whole-workspace migration is not
-implemented. Do not repoint an old legacy configuration at a live active CA.
+stale absolute bindings is rejected by ordinary commands. After an offline move,
+`RECOVERY_ACTION=relocate bin/recovery.sh` previews rebinding; `RELOCATE_APPLY=1`
+applies a fully preflighted, recoverable plan. The root configuration determines
+the old prefix. Real root, nested and historical authority directories are
+validated against that prefix, and custom policy text is preserved. Internal
+absolute symlinks are rebound; external/missing targets, aliased authority storage,
+configuration includes and incomplete state are refused. Existing `ca.meta`/`meta`
+policy digests are updated, without rewriting historical issuer policy records.
+No PKI files at the old prefix are modified. Source and destination workspaces
+must not be used concurrently. Pending operations must be resolved first.
+Do not repoint an old legacy configuration at a live active CA.
 
 ## FILE and CHAIN
 
@@ -174,13 +183,13 @@ Most switches activate only for the literal string `1`. A replacement should val
   authority paths are not discovered. DRY_RUN=1 conflicts with CLEAN_APPLY=1.
   Deletion is sequential, not transactional: a filesystem error after an earlier
   deletion cannot restore that directory. Backups remain an operator operation.
-- VERIFY_DNS, VERIFY_IP or VERIFY_EMAIL: at most one literal expected identity,
+- VERIFY_DNS, VERIFY_IP, VERIFY_EMAIL, VERIFY_URI or VERIFY_SUBJECT: at most one literal expected identity,
   independently of the CN used to select a certificate. VERIFY_PURPOSE selects
   sslclient, sslserver, nssslserver, smimesign, smimeencrypt, crlsign, any,
   ocsphelper, timestampsign or codesign (backend support required).
 - VERIFY_MODE=strict requires an identity and a purpose other than any. It enables
   full-chain CRL coverage regardless of VERIFY_CRL, requires the identity type in
-  SAN, and adds X.509 strict validation and root self-signature validation.
+  SAN (except explicit RFC2253 VERIFY_SUBJECT), and adds X.509 strict validation and root self-signature validation.
 - CRL_HISTORY=1 with crl-all includes root and all discovered current/retained
   issuers, including legacy directories. With crl, it includes root and the
   selected authority's generations. ISSUER_ID cannot be combined with this option.
@@ -190,3 +199,27 @@ These new Make values use the same literal environment transport as other public
 inputs. CLEAN_APPLY and CRL_HISTORY accept only 0/1. The existing ordinary CRL and
 verification modes retain their default scope. See chapters 05–06 for validity
 refusals, strict verification and historical renewal failure boundaries.
+
+## Maintenance controls
+
+`RECOVERY_ACTION=report|resume|relocate|acknowledge` selects the direct recovery
+script mode. Report is the default and creates no lock. Resume requires a complete
+verified installation plan and takes the workspace lock. Relocate previews by
+default; `RELOCATE_APPLY=1` applies and conflicts with `DRY_RUN=1`.
+`AUTO_RECOVER=1` opts into verified plan completion before the next locked command;
+the default is 0. It never changes the read-only behavior of `DRY_RUN=1`.
+`RECOVERY_ID` and `RECOVERY_NOTE` remain mandatory for manual acknowledgment.
+
+VERIFY_ATTIME selects canonical nonnegative Unix seconds through year 9999 for
+both certificate and CRL validity. URI matching is exact and case-sensitive;
+subject matching uses the complete RFC2253 representation without `subject=`.
+
+## Runtime durability dependency
+
+Mutating commands require `python3` (3.8+) for checked Linux/macOS persistence
+barriers. There is no disable/best-effort flag. Missing Python or an unsupported
+initial barrier fails before admitting PKI mutations; later barrier failures keep
+the operation blocked for review. An interrupted operation may leave
+`.recovery/power-loss`, including when no issuance journal exists; report, verified
+resume and explicit acknowledgment retain the existing `RECOVERY_ACTION` interface.
+See chapter 08 and the recovery guides for admission and qualification limits.

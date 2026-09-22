@@ -216,6 +216,12 @@ override VERIFY_EMAIL := $(value VERIFY_EMAIL)
 export VERIFY_EMAIL
 override VERIFY_PURPOSE := $(value VERIFY_PURPOSE)
 export VERIFY_PURPOSE
+override VERIFY_URI := $(value VERIFY_URI)
+export VERIFY_URI
+override VERIFY_SUBJECT := $(value VERIFY_SUBJECT)
+export VERIFY_SUBJECT
+override VERIFY_ATTIME := $(value VERIFY_ATTIME)
+export VERIFY_ATTIME
 override CLEAN_APPLY := $(value CLEAN_APPLY)
 export CLEAN_APPLY
 override CRL_HISTORY := $(value CRL_HISTORY)
@@ -264,6 +270,8 @@ override COL_SERIAL := $(value COL_SERIAL)
 export COL_SERIAL
 override COL_EXPIRES := $(value COL_EXPIRES)
 export COL_EXPIRES
+override REISSUE_MODE := $(value REISSUE_MODE)
+export REISSUE_MODE
 override COL_CN := $(value COL_CN)
 export COL_CN
 override FORCE_REISSUE := $(value FORCE_REISSUE)
@@ -316,6 +324,10 @@ override RECOVERY_ID := $(value RECOVERY_ID)
 export RECOVERY_ID
 override RECOVERY_NOTE := $(value RECOVERY_NOTE)
 export RECOVERY_NOTE
+override AUTO_RECOVER := $(value AUTO_RECOVER)
+export AUTO_RECOVER
+override RELOCATE_APPLY := $(value RELOCATE_APPLY)
+export RELOCATE_APPLY
 
 # Automatic target names are data too, including pattern-rule stems.
 override CERTNIFY_TARGET = $@
@@ -657,3 +669,15 @@ test-stage7:
 .PHONY: test-stage8
 test-stage8:
 	python3 -B test/stage8.py
+
+.PHONY: test-stage9
+test-stage9:
+	python3 -B test/stage9.py
+
+.PHONY: test-stage10
+test-stage10:
+	python3 -B test/stage10.py
+
+.PHONY: test-stage11
+test-stage11:
+	python3 -B test/stage11.py

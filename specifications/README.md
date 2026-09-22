@@ -31,8 +31,10 @@ a new implementation may use a different internal store with an explicit import
 and export mapping. Bash commands are adapters, not a required implementation
 language. Suggested internal interfaces are labeled as such, not public APIs.
 
-Limits are part of the contract: manual crash reconciliation is supported;
-automatic repair, distributed locking and power-loss durability are not promised.
+Limits are part of the contract: a durable command fence and checked persistence
+barriers support verified resumption or manual crash reconciliation. Automatic
+repair, distributed locking and hardware-independent power-loss guarantees are
+not promised; real storage power-cut behavior remains to be qualified.
 Validation results qualify only the platform and scenarios listed in chapter 10.
 A future implementation must not turn a partial failure into an implicit retry or
 assume an untested behavior is guaranteed. Profile fragments in `../profiles/`

@@ -81,6 +81,8 @@ class Recovery(unittest.TestCase):
                 before_report = snapshot(self.work)
                 self.run_cmd(['bash', 'bin/recovery.sh'])
                 self.assertEqual(before_report, snapshot(self.work))
+                self.run_cmd(['bash', 'bin/recovery.sh'], success=False, RECOVERY_ACTION='resume')
+                self.assertEqual(before_report, snapshot(self.work))
                 self.acknowledge()
         self.make('server', 'CN=next.example')
         serials = [row.split('\t')[3] for row in (self.ca / 'index.txt').read_text().splitlines()]
@@ -120,17 +122,17 @@ class Recovery(unittest.TestCase):
         self.acknowledge()
         self.make('int-web', 'CN=Recovery Web', 'ROTATE_KEY=1')
 
-    def test_certificate_install_failure_and_post_verify_failure(self):
+    def test_certificate_install_failure_and_prepublication_verify_failure(self):
         path = self.shim('mv', '[[ "$1" == -f && "$2" == */.install.* && "$3" == */certs/install.example.cert.pem ]]')
         self.make('server', 'CN=install.example', success=False, PATH=path)
         self.assertFalse((self.ca / 'certs/install.example.cert.pem').exists())
         self.assertTrue((self.ca / 'newcerts/1000.pem').exists())
         self.assertIn('issuance-committed', (self.work / '.recovery/pending/phase').read_text())
         self.acknowledge()
-        wrapper = self.wrapper('if [[ "$1" == verify && " $* " == *"/post.example.cert.pem "* ]]; then exit 74; fi')
+        wrapper = self.wrapper('if [[ "$1" == verify && " $* " == *"/certs/.tmp."* ]]; then exit 74; fi')
         self.make('server', 'CN=post.example', success=False, OPENSSL=wrapper)
-        self.assertTrue((self.ca / 'certs/post.example.cert.pem').exists())
-        self.assertIn('post-verification', (self.work / '.recovery/pending/phase').read_text())
+        self.assertFalse((self.ca / 'certs/post.example.cert.pem').exists())
+        self.assertIn('issuance-committed', (self.work / '.recovery/pending/phase').read_text())
         self.assertEqual((self.ca / 'serial').read_text().strip(), '1002')
 
     def test_lifecycle_move_failures_preserve_history_and_block_restart(self):

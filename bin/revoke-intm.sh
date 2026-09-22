@@ -10,6 +10,7 @@
 # Usage:
 #   KIND=smime REASON=keyCompromise CRL_UPDATE=1 CRL_DAYS=7 bin/revoke-intm.sh
 #   INT_DIR="intm-web-ca" REASON=cessationOfOperation bin/revoke-intm.sh
+#   KIND=web REASON=removeFromCRL CRL_UPDATE=1 bin/revoke-intm.sh
 #
 # Env:
 #   INT_DIR / KIND            : select intermediate (INT_DIR wins; fallback KIND→intm-<KIND>-ca)
@@ -79,6 +80,11 @@ before_status="$(awk -F '\t' -v s="$SERIAL_HEX" '$4==s{print $1}' "$ROOT_INDEX")
 [[ "$before_status" == V || "$before_status" == E || "$before_status" == R ]] || die "Intermediate is not uniquely recorded in root index"
 check_pair "$ROOT_DIR/root/certs/ca.cert.pem" "$ROOT_DIR/root/private/ca.key.pem"
 "$OPENSSL" verify -no_check_time -CAfile "$ROOT_DIR/root/certs/ca.cert.pem" "$TARGET" >/dev/null
+if [[ "$REASON" == removeFromCRL ]]; then
+  release_certificate_hold root "$TARGET" "$ROOT_DIR/root/certs/ca.cert.pem" \
+    "$ROOT_DIR/root/private/ca.key.pem" "$ROOT_DIR/root/crl/ca.crl.pem" "$INT_DISABLED_FLAG"
+  exit 0
+fi
 if [[ "${DRY_RUN:-0}" == 1 ]]; then
   info "PLAN intermediate=$DIR current=$before_status crl_refresh=${CRL_UPDATE:-0}; issuance would be disabled"
   exit 0
@@ -93,7 +99,11 @@ else
   [[ "$after_status" == R ]] || die "Unexpected root index state after revocation"
   index_set_filename_for_revoked "$ROOT_INDEX" "$SERIAL_HEX" || die "Revocation committed; index normalization failed"
 fi
-[[ -f "$INT_DISABLED_FLAG" ]] || : > "$INT_DISABLED_FLAG"
+if [[ ! -e "$INT_DISABLED_FLAG" ]]; then
+  if [[ "$REASON" == certificateHold && "$before_status" != R ]]; then
+    printf 'certificateHold:%s\n' "$(certificate_id "$TARGET")" > "$INT_DISABLED_FLAG"
+  else : > "$INT_DISABLED_FLAG"; fi
+fi
 if [[ "${CRL_UPDATE:-0}" == 1 ]]; then
   publish_crl root root/certs/ca.cert.pem root/private/ca.key.pem root/crl/ca.crl.pem -crldays "${CRL_DAYS:-7}" \
     || die "Intermediate revocation is committed; Root CRL refresh failed and previous CRL was preserved"

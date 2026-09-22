@@ -3,10 +3,11 @@ normalize_revocation_reason() {
   REASON="${REASON:-cessationOfOperation}"
   if [[ "$REASON" == privilegeWithdrawn ]]; then
     REASON="${MAP_PRIV_WITHDRAWN_TO:-cessationOfOperation}"
+    [[ "$REASON" != removeFromCRL ]] || die "Release must explicitly request REASON=removeFromCRL, not a revocation mapping"
     warn "Mapping privilegeWithdrawn to $REASON"
   fi
   case "$REASON" in
-    removeFromCRL) die "removeFromCRL is unsupported: release from certificateHold is not implemented" ;;
+    removeFromCRL) ;;
     unspecified|keyCompromise|CACompromise|affiliationChanged|superseded|cessationOfOperation|certificateHold|AACompromise) ;;
     *) die "Unsupported revocation reason: $REASON" ;;
   esac
@@ -16,7 +17,8 @@ normalize_revocation_reason() {
 
 # LC_ALL=C OpenSSL dates are parsed without platform-specific date flags.
 validate_crl() {
-  local file="$1" cert="$2" issuer subject signature dates
+  local file="$1" cert="$2" reference_time="${3:-}" issuer subject signature dates
+  [[ -n "$reference_time" ]] || reference_time="$(date -u +%Y%m%d%H%M%S)"
   [[ -s "$file" ]] || { warn "Missing/empty required CRL: $file"; return 1; }
   awk '/^-----BEGIN X509 CRL-----$/{b++} /^-----END X509 CRL-----$/{e++} END{exit(b!=1 || e!=1)}' "$file" || { warn "Expected one PEM CRL: $file"; return 1; }
   issuer="$("$OPENSSL" crl -in "$file" -noout -issuer -nameopt RFC2253)" || return 1
@@ -25,7 +27,7 @@ validate_crl() {
   signature="$(LC_ALL=C "$OPENSSL" crl -in "$file" -noout -verify -CAfile "$cert" 2>&1)" || { warn "Invalid CRL signature: $file"; return 1; }
   [[ "$signature" == 'verify OK' ]] || { warn "CRL signature verification did not succeed: $file"; return 1; }
   dates="$(LC_ALL=C "$OPENSSL" crl -in "$file" -noout -lastupdate -nextupdate)" || return 1
-  if ! printf '%s\n' "$dates" | LC_ALL=C awk -v now="$(date -u +%Y%m%d%H%M%S)" '
+  if ! printf '%s\n' "$dates" | LC_ALL=C awk -v now="$reference_time" '
     function stamp(v, a,n,m,i,t,d,y,max) {
       sub(/^[^=]*=/,"",v); n=split(v,a,/[ :]+/)
       split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec",months," ")

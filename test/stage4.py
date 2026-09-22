@@ -111,11 +111,11 @@ class Revocation(unittest.TestCase):
         self.make('revoke', 'KIND=web', 'CN=leaf.example', 'DRY_RUN=1')
         self.make('revoke-intermediate', 'KIND=web', 'DRY_RUN=1')
         self.make('revoke-intm-and-leafs', 'KIND=web', 'DRY_RUN=1')
-        self.make('reissue-leafs-web', 'INPUT=batch.tsv', 'DRY_RUN=1')
+        self.make('reissue-leafs-web', 'REISSUE_MODE=cn-only', 'INPUT=batch.tsv', 'DRY_RUN=1')
         self.assertEqual(before, snapshot(self.work))
         self.assertFalse((self.work / '.locks').exists())
 
-    def test_idempotence_refresh_and_unsupported_release(self):
+    def test_idempotence_refresh_and_invalid_release(self):
         self.crls()
         for target in [('revoke', 'KIND=web', 'CN=leaf.example'), ('revoke-intermediate', 'KIND=web'), ('revoke-intm-and-leafs', 'KIND=web')]:
             before = snapshot(self.work)
