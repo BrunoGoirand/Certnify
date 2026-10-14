@@ -7,6 +7,9 @@ source "$(dirname "$0")/pki-env.sh"
 for flag in "$FINAL_MODE" "$ALLOW_REMAINING_LEAFS" "$DRY_RUN"; do
   [[ "$flag" == 0 || "$flag" == 1 ]] || die "Final CRL flags must be 0 or 1"
 done
+if [[ -n "${PUBLISH_CMD:-}${PUBLISH_FETCH_CMD:-}" ]]; then
+  python3 -B "$ROOT_DIR/bin/pki-publish.py" check || die "Invalid publication configuration"
+fi
 pki_plan_or_begin
 if [[ -z "${INT_DIR:-}" ]]; then INT_DIR="intm-${KIND:?INT_DIR or KIND required}-ca"; fi
 INT_DIR="$(resolve_authority "$INT_DIR")"
@@ -84,24 +87,18 @@ report="$CRL_PEM.publication"
 printf 'attempt=%s\nlocal=complete\n' "$(date -u +%FT%TZ)" >> "$report"
 durability_flush || die "Cannot persist local CRL before remote publication"
 if [[ -n "${PUBLISH_CMD:-}" ]]; then
-  failed=0
   cd "$output_dir"
+  artifacts=()
   for output in "$CRL_PEM" "$CRL_DER" "$CRL_PEM.sha256" "$CRL_DER.sha256" "$LATEST_PEM" "$LATEST_DER"; do
-    file="$(basename "$output")"
-    # Only generated basenames enter this trusted operator-supplied shell command.
-    command="${PUBLISH_CMD//%FILE%/$file}"
-    if bash -c "$command"; then
-      printf 'artifact=%s status=published\n' "$file" | tee -a "$report"
-    else
-      printf 'artifact=%s status=failed\n' "$file" | tee -a "$report" >&2
-      failed=$((failed+1))
-    fi
+    artifacts+=("$(basename "$output")")
   done
-  if [[ "$failed" != 0 ]]; then
-    warn "Local CRL committed; $failed remote artifacts failed. Resume with INT_DIR=$INT_DIR FINAL_CRL=$CRL_PEM and the same OUT_DIR/PUBLISH_CMD. Receipt: $report"
+  if ! python3 -B "$ROOT_DIR/bin/pki-publish.py" "${artifacts[@]}" | tee -a "$report"; then
+    warn "Local CRL committed; remote publication failed or unverified. Resume with INT_DIR=$INT_DIR FINAL_CRL=$CRL_PEM and the same OUT_DIR/PUBLISH_CMD/PUBLISH_FETCH_CMD. Receipt: $report"
     exit 1
   fi
-  info "All six CRL artifacts published successfully"
+  cd "$ROOT_DIR"
+  [[ "$(cat "$CRL_PEM.resume-state")" == "$(crl_resume_state "$INT_DIR" "$CRL_PEM")" ]] || die "CRL state changed during publication; review remote state"
+  info "All six CRL artifacts published and read-back verified"
 else
   printf 'remote=not-requested\n' >> "$report"
   info "Final CRL prepared locally; remote publication not requested"

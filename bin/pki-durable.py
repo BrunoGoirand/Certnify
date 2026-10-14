@@ -16,6 +16,26 @@ import sys
 import uuid
 
 
+ANCILLARY = frozenset(('notes', 'draft', 'image', '.vscode'))
+AUTHORITY_MARKERS = frozenset(('index.txt', 'serial', 'crlnumber', 'ca.meta'))
+
+
+def check_ancillary(path, device):
+    """Do not silently exclude authority state created by older versions.
+
+    Inspect names/directories only: never open ancillary files or special
+    entries. Aliases are not followed, just as in the persistence walk.
+    """
+    if path.is_symlink() or not path.is_dir():
+        return
+    if path.stat().st_dev != device:
+        raise ValueError('Ancillary directory must stay on the workspace filesystem: ' + str(path))
+    for child in path.iterdir():
+        if child.name in AUTHORITY_MARKERS or child.name == 'ca.key.pem':
+            raise ValueError('Authority state in reserved ancillary directory; relocate before use: ' + str(child))
+        check_ancillary(child, device)
+
+
 def sync_path(path, full=False):
     mode = path.lstat().st_mode
     if stat.S_ISLNK(mode):
@@ -53,6 +73,9 @@ def sync_tree(root):
         if path.is_dir():
             for child in sorted(path.iterdir()):
                 if path == root and child.name in ('.git', '.locks'):
+                    continue
+                if path == root and child.name in ANCILLARY:
+                    check_ancillary(child, device)
                     continue
                 visit(child)
         sync_path(path)
@@ -110,6 +133,9 @@ class Store:
     def begin(self, pid):
         if self.fence.exists() or self.error.exists():
             raise ValueError('Unresolved power-loss fence: ' + str(self.fence))
+        # Qualify existing entries and actual persistence syscalls before
+        # admitting a mutation. Failure here requires no recovery fence/lock.
+        self.flush()
         created = not self.journal.exists()
         self.journal.mkdir(mode=0o700, exist_ok=True)
         data = dict(schema=1, id=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + pid,

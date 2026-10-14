@@ -117,11 +117,12 @@ reported in the error, with the same OUT_DIR and intended PUBLISH_CMD:
 
 ```sh
 INT_DIR=intm-web-ca FINAL_CRL=crl/ca-<version>.crl.pem \
-  PUBLISH_CMD='your-publisher %FILE%' bin/intm-publish-final-crl.sh
+  ALLOW_ADMIN_HOOKS=1 PUBLISH_TIMEOUT=60 \
+  PUBLISH_CMD='your-publisher %FILE%' \
+  PUBLISH_FETCH_CMD='your-remote-reader %FILE%' bin/intm-publish-final-crl.sh
 ```
 
-This reuses the existing valid CRL without consuming another CRL number. All six
-artifacts are attempted again; the publisher must tolerate repeated copies.
+This reuses the existing valid CRL without consuming another CRL number. The sequence restarts from the first artifact and stops on failure; the publisher must tolerate repeated copies.
 Review `.publication` receipts. An expired CRL needs fresh generation. A final
 CRL never freezes issuance or ends the operator's revocation-service responsibility.
 

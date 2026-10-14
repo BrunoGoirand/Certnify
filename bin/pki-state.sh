@@ -38,6 +38,8 @@ workspace_path() {
   # These paths are excluded from persistence scans and must never hold CA data.
   case "${resolved#"$ROOT_DIR/"}" in
     .git|.git/*|.locks|.locks/*) die "Reserved non-PKI path: $resolved" ;;
+    notes|notes/*|draft|draft/*|image|image/*|.vscode|.vscode/*)
+      die "Reserved ancillary path cannot hold PKI state: $resolved" ;;
   esac
   if grep -Fxq -- "${resolved#"$ROOT_DIR/"}" "$ROOT_DIR/test/source-manifest.txt"; then
     die "Distribution source cannot be used as operational PKI state: $resolved"
@@ -53,6 +55,8 @@ data_path() {
   absolute="$(workspace_path "$raw" "${2:-target}")" || return 1
   for relative in "${raw#"$ROOT_DIR/"}" "${absolute#"$ROOT_DIR/"}"; do
     case "$relative" in
+      notes|notes/*|draft|draft/*|image|image/*|.vscode|.vscode/*)
+        die "Reserved ancillary path cannot hold PKI state: $relative" ;;
       .git|.git/*|.locks|.locks/*|.recovery|.recovery/*|bin|bin/*|test|test/*|profiles|profiles/*|specifications|specifications/*)
         die "Reserved PKI data path: $relative" ;;
       out|out/*) die "Reserved inventory export directory cannot hold an authority: $relative" ;;

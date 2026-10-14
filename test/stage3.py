@@ -56,14 +56,14 @@ class Commands(unittest.TestCase):
     def test_partial_reissue_and_committed_failure_not_retried(self):
         self.inventory('fail.example', 'success.example')
         command = 'bin/gen-server.sh && { if [[ "$CN" == fail.example ]]; then exit 23; fi; }'
-        r = self.make('reissue-leafs-web', 'INPUT=unusual.tsv', success=False, ISSUE_CMD=command)
+        r = self.make('reissue-leafs-web', 'INPUT=unusual.tsv', success=False, ALLOW_ADMIN_HOOKS='1', ISSUE_CMD=command)
         self.assertIn('serial=1000 status=failed', r.stderr)
         self.assertIn('serial=1001 status=completed', r.stdout)
         self.assertIn('failed=1', r.stdout)
         ca = self.work / 'intm-web-ca'
         self.assertEqual(len((ca / 'index.txt').read_text().splitlines()), 2)
         before = snapshot(ca)
-        r = self.make('reissue-leafs-web', 'INPUT=unusual.tsv', success=False, ISSUE_CMD=command)
+        r = self.make('reissue-leafs-web', 'INPUT=unusual.tsv', success=False, ALLOW_ADMIN_HOOKS='1', ISSUE_CMD=command)
         self.assertIn('status=needs_review', r.stderr)
         self.assertIn('status=already_completed', r.stdout)
         self.assertEqual(before, snapshot(ca))
@@ -71,14 +71,14 @@ class Commands(unittest.TestCase):
     def test_custom_command_values_are_data_and_placeholders_rejected(self):
         name = "O'Brien $(touch injected)"
         self.inventory(name)
-        self.make('reissue-leafs-web', 'INPUT=unusual.tsv', ISSUE_CMD='printf "%s" "$CN" > received')
+        self.make('reissue-leafs-web', 'INPUT=unusual.tsv', ALLOW_ADMIN_HOOKS='1', ISSUE_CMD='printf "%s" "$CN" > received')
         self.assertEqual((self.work / 'received').read_text(), name)
         self.assertFalse((self.work / 'injected').exists())
-        self.make('reissue-leafs-web', 'INPUT=unusual.tsv', success=False, ISSUE_CMD="echo '%CN%'")
+        self.make('reissue-leafs-web', 'INPUT=unusual.tsv', success=False, ALLOW_ADMIN_HOOKS='1', ISSUE_CMD="echo '%CN%'")
 
     def test_concurrent_reissue_claim_is_not_repeated(self):
         self.inventory('once.example')
-        env = dict(self.env, ISSUE_CMD='echo invoked >> invocations; sleep 3')
+        env = dict(self.env, ALLOW_ADMIN_HOOKS='1', ISSUE_CMD='echo invoked >> invocations; sleep 3')
         command = ['make', 'reissue-leafs-web', 'INPUT=unusual.tsv', 'KEY_ALG=EC']
         first = subprocess.Popen(command, cwd=self.work, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         try:
@@ -86,7 +86,7 @@ class Commands(unittest.TestCase):
             while not (self.work / 'invocations').exists() and time.monotonic() < deadline:
                 time.sleep(0.05)
             self.assertTrue((self.work / 'invocations').exists())
-            r = self.run_cmd(command, success=False, ISSUE_CMD=env['ISSUE_CMD'])
+            r = self.run_cmd(command, success=False, ALLOW_ADMIN_HOOKS='1', ISSUE_CMD=env['ISSUE_CMD'])
             self.assertIn('status=needs_review', r.stderr)
             output, _ = first.communicate(timeout=30)
             self.assertEqual(first.returncode, 0, output)

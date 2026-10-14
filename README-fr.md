@@ -334,7 +334,7 @@ manquante ou un profil incompatible provoque un refus. Le numéro de série,
 l’émetteur, les identifiants SKI/AKI et la validité sont renouvelés (`DAYS` reste
 applicable dans les limites de la chaîne). Ce mode nécessite OpenSSL 3.x.
 L’ancien comportement reste accessible explicitement avec `REISSUE_MODE=cn-only`.
-Une commande personnalisée `ISSUE_CMD` ne bénéficie pas de cette garantie.
+Une commande personnalisée `ISSUE_CMD` exige `ALLOW_ADMIN_HOOKS=1` et ne bénéficie pas de cette garantie.
 Les reçus par élément bloquent les reprises aveugles après un résultat incertain. Voir la
 [spécification du cycle de vie](specifications/07-lifecycle-and-migration.md).
 
@@ -347,7 +347,10 @@ KIND=web DRY_RUN=1 bin/intm-publish-final-crl.sh
 Sans DRY_RUN, il génère PEM, DER et empreintes, ainsi que les alias les plus récents.
 Par défaut, il refuse les certificats indexés non révoqués et non expirés. « Finale »
 reste indicatif : l’autorité n’est pas retirée du service. La publication distante
-exige un PUBLISH_CMD explicitement configuré. Les six artefacts doivent réussir.
+exige `PUBLISH_CMD`, `PUBLISH_FETCH_CMD` et `ALLOW_ADMIN_HOOKS=1`.
+La commande de relecture émet les octets distants sur stdout ; les six artefacts
+doivent correspondre aux octets locaux. `PUBLISH_TIMEOUT=60` borne la séquence
+complète des hooks (1 à 3600 secondes).
 FINAL_CRL sélectionne un PEM versionné valide conservé pour retenter sans consommer
 un autre numéro de CRL. Son fichier local `.resume-state` doit correspondre au
 PEM, aux entrées révoquées et au prochain compteur de CRL. Une révocation ou une
@@ -355,6 +358,12 @@ tentative ultérieure de génération de CRL rend cette reprise impossible : gé
 une nouvelle CRL finale. Les anciennes CRL sans cet état doivent aussi être
 régénérées. Le rafraîchissement courant remplace les alias sans modifier leurs
 archives ; si un DER courant existe, il est actualisé avec le PEM. Voir le [guide de publication et reprise](specifications/guides/recovery-fr.md).
+
+Le [contrat de sécurité opérateur](specifications/guides/security-en.md) précise
+les hooks de confiance, le périmètre de stockage, la relecture distante et les
+limites de protection. `notes/`, `draft/`, `image/` et `.vscode/` sont réservés
+aux annexes et exclus des synchronisations de fichiers PKI ; aucune autorité ne
+doit y être placée, même via un alias.
 
 ## Stockage et interruptions
 

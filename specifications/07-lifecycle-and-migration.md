@@ -108,12 +108,12 @@ and configured options apply. This mode does not recover original subject, SANs,
 profile or key parameters and does not require source certificates. Use it only
 when that loss has been reviewed.
 
-`ISSUE_CMD` remains an explicitly supplied, trusted Bash command. It receives
+`ISSUE_CMD` requires `ALLOW_ADMIN_HOOKS=1` and remains a trusted Bash command. It receives
 `CN`, `SERIAL`, `EXPIRES`, `INT_DIR`, `ACTIVE_DIR`, `LEGACY_DIR`, and the expected
 issuer identity through the environment. Quote variable expansions normally:
 
 ```sh
-ISSUE_CMD='SAN="DNS:$CN" DAYS=397 bin/gen-server.sh' \
+ALLOW_ADMIN_HOOKS=1 ISSUE_CMD='SAN="DNS:$CN" DAYS=397 bin/gen-server.sh' \
   make reissue-leafs-web INPUT=out/custom-name.tsv
 ```
 
@@ -193,12 +193,24 @@ fingerprint labels/colons. All cryptographic conversion, digest and base64 calls
 use `OPENSSL`; byte-to-hex formatting uses `od`/`tr`. Previously malformed labeled
 sidecars should be regenerated rather than accepted as a second format.
 
-`PUBLISH_CMD` is trusted administrator-supplied shell code. `%FILE%` is replaced
-with a generated basename and the command runs in OUT_DIR. All six artifacts
-(PEM, DER, both sidecars, both latest aliases) are attempted; each receives a
-`published` or `failed` result. Any failure yields nonzero status. The append-only
-`.crl.pem.publication` receipt records attempts and outcomes; success means the
-configured command exited zero, not independent proof of remote integrity.
+`PUBLISH_CMD` and `PUBLISH_FETCH_CMD` are trusted administrator-supplied shell
+code, admitted only with `ALLOW_ADMIN_HOOKS=1`. `%FILE%` is replaced with a quoted
+generated basename and each command runs in OUT_DIR. The fetch command must emit
+only the bytes read from the consumer-facing remote destination on stdout.
+All six artifacts (PEM, DER, both sidecars, both latest aliases) must be copied
+and read back with matching size and SHA-256. A zero upload exit alone is never
+success. The first failure stops the sequence; the receipt records `verified`
+(with the hash) or `failed`, and errors produce nonzero status.
+`PUBLISH_TIMEOUT=60` is a shared deadline for all upload/read-back hooks, validated
+as 1–3600 seconds before any CRL mutation. Ordinary process-group descendants are
+killed on timeout, cancellation and completion; adapters must not daemonize.
+The workspace lock remains held to keep local CRL state stable. After transfer,
+local fingerprints and CRL resume state are checked again. A timed-out attempt
+leaves the local CRL committed and releases the lock after normal durability
+barriers; the remote state may be partial. Both adapters must be idempotent.
+The read-back adapter and destination authentication remain operator trust inputs;
+a dishonest adapter can fabricate evidence. Verification is a point-in-time check,
+not a guarantee of later availability. See the [security contract](guides/security-en.md).
 Without PUBLISH_CMD the result explicitly says local-only, never remote success.
 
 To resume conversion, local installation or remote publication without generating
@@ -206,7 +218,9 @@ a new CRL or consuming another number, supply the same versioned PEM:
 
 ```sh
 INT_DIR=intm-web-ca FINAL_CRL=crl/ca-<version>.crl.pem \
-  PUBLISH_CMD='your-publisher %FILE%' bin/intm-publish-final-crl.sh
+  ALLOW_ADMIN_HOOKS=1 PUBLISH_TIMEOUT=60 \
+  PUBLISH_CMD='your-publisher %FILE%' \
+  PUBLISH_FETCH_CMD='your-remote-reader %FILE%' bin/intm-publish-final-crl.sh
 ```
 
 Reuse the original OUT_DIR if customized. FINAL_CRL must be a versioned PEM in

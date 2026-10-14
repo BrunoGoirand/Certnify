@@ -148,12 +148,22 @@ Only a successful exit with `Local state durably synchronized` is a completed
 mutating command acknowledgment; earlier progress messages are not acknowledgments.
 
 The conservative synchronization scope is the physical workspace, excluding `.git`,
-`.locks` and the exact source files listed in the trusted distribution manifest.
+`.locks`, the exact source files listed in the trusted distribution manifest,
+and the reserved ancillary trees `notes/`, `draft/`, `image/`, `.vscode/`.
+Ancillary entries are inspected by name to reject legacy authority markers
+(`index.txt`, `serial`, `crlnumber`, `ca.meta`, `ca.key.pem`), but their files
+are never opened or synchronized. Authority paths and aliases into these trees
+are refused. Existing authority data there must be relocated offline before use.
+The same synchronization and device barrier run before creating a new command
+fence: an existing unsupported operational entry or I/O error thus refuses
+admission before mutation, without leaving a new fence or owned lock.
 Symlinks are never followed; their parent directories are synchronized. Nested
 mounts and unsupported special files are rejected. Keep operational state separate
 from distribution source files and on one local filesystem. Operational path
 resolution rejects `.git`, `.locks` and exact distribution source paths, including
-aliases resolving into those exclusions. The scan cost grows
+aliases resolving into those exclusions and the reserved ancillary trees.
+Recovery copies, custom/nested authorities, generations, exports and other
+nonexcluded workspace entries remain fully covered. The scan cost grows
 with retained PKI history; this implementation favors a complete persistence
 boundary over per-file write tracking. No files outside the workspace are covered.
 

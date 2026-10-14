@@ -34,7 +34,7 @@ class Barriers(unittest.TestCase):
         events = []
         with patch.object(durable, 'sync_path', side_effect=lambda path, **kwargs: events.append(path)):
             self.store.begin('123')
-            self.assertEqual(events[:3], [self.store.fence, self.store.journal, self.root])
+            self.assertEqual(events[:4], [self.root, self.store.fence, self.store.journal, self.root])
             data = self.root / 'index.txt'
             data.write_text('state')
             events.clear()

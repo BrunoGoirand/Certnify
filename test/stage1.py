@@ -262,7 +262,7 @@ class Records(unittest.TestCase):
         # A malformed later row cannot run an earlier batch command.
         (workspace / 'batch.tsv').write_text('1000\t2027-01-01T00:00:00Z\taxb\tunknown\nbad\n')
         r = subprocess.run(['bash', 'bin/intm-reissue-leafs.sh'], cwd=workspace,
-                           env=dict(self.env, KIND='web', INPUT='batch.tsv', ISSUE_CMD='touch executed'),
+                           env=dict(self.env, KIND='web', INPUT='batch.tsv', ALLOW_ADMIN_HOOKS='1', ISSUE_CMD='touch executed'),
                            capture_output=True, text=True)
         self.assertNotEqual(r.returncode, 0)
         self.assertFalse((workspace / 'executed').exists())

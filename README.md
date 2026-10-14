@@ -311,7 +311,7 @@ including in `DRY_RUN=1`. Missing evidence or incompatible profiles fail closed.
 Issuer, serial number, SKI/AKI and validity are renewed; `DAYS` still selects the
 new lifetime within the chain limits. This mode requires OpenSSL 3.x.
 For reviewed lossy reissuance from a TSV alone, use `REISSUE_MODE=cn-only`.
-Custom `ISSUE_CMD` commands have no preservation guarantee.
+Custom `ISSUE_CMD` commands require `ALLOW_ADMIN_HOOKS=1` and have no preservation guarantee.
 Per-item receipts block blind retries after uncertain results. See the
 [lifecycle specification](specifications/07-lifecycle-and-migration.md).
 
@@ -324,7 +324,9 @@ KIND=web DRY_RUN=1 bin/intm-publish-final-crl.sh
 Without DRY_RUN it generates PEM, DER and digest sidecars, plus latest aliases.
 By default it refuses unrevoked, unexpired indexed leaves. “Final” is advisory;
 it does not retire the authority. Remote publication occurs only with an explicitly
-configured PUBLISH_CMD. All six artifacts must succeed. FINAL_CRL selects a retained
+configured `PUBLISH_CMD`, `PUBLISH_FETCH_CMD` and `ALLOW_ADMIN_HOOKS=1`.
+The fetch command emits the remote bytes on stdout; all six artifacts must match
+the local bytes. `PUBLISH_TIMEOUT=60` bounds the whole hook sequence (1–3600 seconds). FINAL_CRL selects a retained
 valid versioned PEM to retry without consuming another CRL number. Its local
 `.resume-state` must match the PEM, revoked index entries and next CRL counter.
 A subsequent revocation or CRL generation attempt invalidates that retry; generate
@@ -332,6 +334,9 @@ a fresh final CRL. Older final CRLs without this state must also be regenerated.
 Routine refresh replaces latest aliases without changing versioned archives;
 if a current DER exists, it is refreshed alongside the PEM. See the
 [publication and recovery guide](specifications/guides/recovery-en.md).
+
+See the [operator security contract](specifications/guides/security-en.md) for
+trusted hooks, storage scope, publication adapters and remaining trust boundaries.
 
 ## Storage and interrupted operations
 

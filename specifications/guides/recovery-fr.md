@@ -118,10 +118,12 @@ commande de publication prévue :
 
 ```sh
 INT_DIR=intm-web-ca FINAL_CRL=crl/ca-<version>.crl.pem \
-  PUBLISH_CMD='your-publisher %FILE%' bin/intm-publish-final-crl.sh
+  ALLOW_ADMIN_HOOKS=1 PUBLISH_TIMEOUT=60 \
+  PUBLISH_CMD='your-publisher %FILE%' \
+  PUBLISH_FETCH_CMD='your-remote-reader %FILE%' bin/intm-publish-final-crl.sh
 ```
 
-Aucun nouveau numéro de CRL n’est consommé. Les six artefacts sont retentés ; la
+Aucun nouveau numéro de CRL n’est consommé. La séquence recommence au premier artefact et s’arrête au premier échec ; la
 commande doit accepter les copies répétées. Examiner les reçus `.publication`.
 Une CRL expirée exige une nouvelle génération. « Finale » reste indicatif : cela
 n’interdit pas l’émission et ne met pas fin au service de révocation.

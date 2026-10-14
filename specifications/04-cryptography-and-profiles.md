@@ -145,9 +145,10 @@ require explicit migration rather than an implicit policy guess.
 
 Changing source profile fragments affects **new configurations only**. Existing
 operator configuration is retained byte-for-byte by ordinary generation. Policy
-updates are an explicit operator edit: retain the previous configuration, review
-the changed sections and intended extension semantics, then edit the installed
-configuration. The toolkit validates it at the next operation and does not
+updates have no controlled toolkit workflow. Do not edit installed configuration
+during operations. For separately reviewed offline maintenance, retain the previous
+configuration, review the changed sections and extension semantics, and qualify
+the change in a disposable copy first. The toolkit validates it at the next operation and does not
 silently replace customizations from new templates. Structural validation is not
 a policy approval or exhaustive validation of arbitrary OpenSSL extension syntax;
 OpenSSL still validates the actual requested CSR/certificate operation.

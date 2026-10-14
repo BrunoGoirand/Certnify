@@ -154,3 +154,13 @@ Two additional stage-12 methods cover make int-generic/make generic and the dire
 gen-generic wrapper: explicit profiles, EXT_SECTION precedence, Ed25519, explicit
 SANs, custom authority paths, no implicit SAN, required inputs, invalid/CA profiles
 and refusal to use a specialized authority. Refusal tests compare workspace state.
+
+## Security risk mitigations
+
+`make test-stage13` covers administrator hook opt-in, literal Make parameters,
+ancillary versus operational FIFO handling, old authority markers in ancillary
+trees, complete persistence coverage of nested retained state, preflight EIO,
+publication configuration admission, false upload success, blocked upload/read,
+oversized or wrong read-back, reader failure and verified idempotent retry.
+Only disposable keys and a local directory adapter are used; remote services,
+hardware power loss and Linux are not qualified by these tests.

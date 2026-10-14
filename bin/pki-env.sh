@@ -27,6 +27,14 @@ die(){ echo "[ERR] $*" >&2; exit 1; }
 info(){ echo "[OK ] $*"; }
 warn(){ echo "[!! ] $*" >&2; }
 
+# Hooks are privileged code, not ordinary PKI parameters. Opt in before any
+# backend call or transaction; this is an accident guard, not a sandbox.
+: "${ALLOW_ADMIN_HOOKS:=0}"
+[[ "$ALLOW_ADMIN_HOOKS" == 0 || "$ALLOW_ADMIN_HOOKS" == 1 ]] || die "ALLOW_ADMIN_HOOKS must be 0 or 1"
+if [[ -n "${ISSUE_CMD:-}${PUBLISH_CMD:-}${PUBLISH_FETCH_CMD:-}" && "$ALLOW_ADMIN_HOOKS" != 1 ]]; then
+  die "Administrator shell hooks require ALLOW_ADMIN_HOOKS=1; only use reviewed operator-owned commands"
+fi
+
 # ---- Portable lock helpers (mkdir-based, works on macOS/Bash 3.2) ----
 LOCK_TIMEOUT="${LOCK_TIMEOUT:-30}"
 declare -a __CERTNIFY_LOCK_DIRS=()

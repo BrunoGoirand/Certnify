@@ -268,6 +268,12 @@ override ISSUE_CMD := $(value ISSUE_CMD)
 export ISSUE_CMD
 override PUBLISH_CMD := $(value PUBLISH_CMD)
 export PUBLISH_CMD
+override PUBLISH_FETCH_CMD := $(value PUBLISH_FETCH_CMD)
+export PUBLISH_FETCH_CMD
+override PUBLISH_TIMEOUT := $(value PUBLISH_TIMEOUT)
+export PUBLISH_TIMEOUT
+override ALLOW_ADMIN_HOOKS := $(value ALLOW_ADMIN_HOOKS)
+export ALLOW_ADMIN_HOOKS
 override COL_SERIAL := $(value COL_SERIAL)
 export COL_SERIAL
 override COL_EXPIRES := $(value COL_EXPIRES)
@@ -695,3 +701,7 @@ test-stage11:
 .PHONY: test-stage12
 test-stage12:
 	python3 -B test/stage12.py
+
+.PHONY: test-stage13
+test-stage13:
+	python3 -B test/stage13.py
