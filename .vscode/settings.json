@@ -1,10 +1,25 @@
 {
+    // Do not use OS theme
+    "window.autoDetectColorScheme": false,
+    // VS Code theme to be used
+    // "workbench.colorTheme": "Light+",
+    // "workbench.colorTheme": "Light 2026",
+    // "workbench.colorTheme": "Visual Studio Light",
+    "workbench.colorTheme": "Light Modern",
+    "workbench.colorCustomizations": {
+        "[Light Modern]": {
+            "editorRuler.foreground": "#ecf1f2",
+            // "tab.activeBackground": "#455e5e",
+            // "terminal.background": "#ffffff",
+            "panel.background": "#ffffff",
+            "activityBar.background": "#ffffff",
+            "sideBar.background": "#ffffff",
+            // 
+        },
+    },
+    //
     "workbench.editor.enablePreview": false,
     "workbench.editor.enablePreviewFromQuickOpen": false,
     "workbench.editor.showTabs": "single",
-    "editor.rulers": [4, 8, 12, 16, 20, 24, 28, 32, 36, 48, 60, 72, 84, 96],
-    "workbench.colorCustomizations": {
-        "editorRuler.foreground": "#f5f8f8"
-    }
-
+    "editor.rulers": [4, 8, 12, 16, 20, 24, 28, 32, 36, 48, 60, 72, 84, 96, 108, 120],
 }
