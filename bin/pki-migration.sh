@@ -85,6 +85,11 @@ migration_load() {
   EXT_SECTION_USER_SET=1
   select_leaf_policy "$KEY_ALG"
   FORCE_NEW_KEY=rotate
+  # cn-only migration: SANs are not preserved. Warn if the caller has supplied
+  # SAN variables so the loss is explicit rather than silent.
+  if [[ -n "${SAN:-}${SAN_DNS:-}${SAN_IP:-}${SAN_EMAIL:-}${SAN_URI:-}" ]]; then
+    warn "CN-only migration: caller-supplied SAN variables are ignored (SANs are not preserved in cn-only mode)"
+  fi
   SAN=''; SAN_DNS=''; SAN_IP=''; SAN_EMAIL=''; SAN_URI=''
 }
 

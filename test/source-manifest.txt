@@ -99,3 +99,4 @@ bin/pki-migration.sh
 test/stage9.py
 test/stage10.py
 test/stage11.py
+test/stage14.py

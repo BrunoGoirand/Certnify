@@ -705,3 +705,7 @@ test-stage12:
 .PHONY: test-stage13
 test-stage13:
 	python3 -B test/stage13.py
+
+.PHONY: test-stage14
+test-stage14:
+	python3 -B test/stage14.py
