@@ -2,7 +2,7 @@
 
 # Certnify
 
-[English](README.md)
+[English](README.md) · [Démarrage en production](QUICKSTART-fr.md)
 
 Certnify est un outil de gestion de PKI privée locale, écrit en Bash, avec une
 interface Make et un moteur OpenSSL. Il gère une racine autosignée, des autorités

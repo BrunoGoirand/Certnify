@@ -2,7 +2,7 @@
 
 # Certnify
 
-[Français](README-fr.md)
+[Français](README-fr.md) · [Production quickstart](QUICKSTART.md)
 
 Certnify is a local private-PKI toolkit written in Bash, with a Make interface and
 an OpenSSL backend. It manages a self-signed root, issuing intermediate authorities,

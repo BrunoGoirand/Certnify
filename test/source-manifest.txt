@@ -4,6 +4,8 @@ LICENSE.txt
 Makefile
 README.md
 README-fr.md
+QUICKSTART.md
+QUICKSTART-fr.md
 bin/gen-archive.sh
 bin/gen-code.sh
 bin/gen-generic.sh
