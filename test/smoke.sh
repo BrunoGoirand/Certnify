@@ -146,8 +146,10 @@ run_make revoke KIND=web CN="app.example.test" REASON="cessationOfOperation"
 verify_revoked="$(fixture_make verify KIND=web CN="app.example.test" VERIFY_CRL=1 VERIFY_MODE=info 2>&1)" || die "verify revoked failed"
 assert_contains "$verify_revoked" "VERIFY STATUS: REVOKED" "revoked verify output"
 
-revoked_int_output="$(fixture_make verify-intermediate-revoked KIND=web 2>&1 || true)"
-assert_contains "$revoked_int_output" "OK" "verify-intermediate-revoked command wiring"
+int_verify_output="$(fixture_make verify-intermediate-revoked KIND=web 2>&1)" ||
+  die "Unrevoked intermediate verification failed: $int_verify_output"
+grep -Fxq 'intm-web-ca/certs/ca.cert.pem: OK' <<<"$int_verify_output" ||
+  die "Missing intermediate verification result: $int_verify_output"
 
 rollback_preview="$(fixture_make -n rollback-web)"
 assert_contains "$rollback_preview" "bin/intm-rollback-to-legacy.sh" "rollback recipe"
@@ -207,6 +209,11 @@ clone_workspace "$INTM_REVOKE_CASE"
   run_make int-web CN="Revoked Web CA"
   serial_before="$("$OPENSSL" x509 -in intm-web-ca/certs/ca.cert.pem -noout -serial | sed 's/^serial=//I')"
   run_make revoke-intermediate KIND="web" REASON="keyCompromise"
+  if revoked_int_output="$(fixture_make verify-intermediate-revoked KIND=web 2>&1)"; then
+    die "Revoked intermediate verification unexpectedly succeeded: $revoked_int_output"
+  fi
+  assert_contains "$revoked_int_output" "certificate revoked" "revoked intermediate verification"
+  assert_not_contains "$revoked_int_output" 'intm-web-ca/certs/ca.cert.pem: OK' "revoked intermediate verification"
   run_make int-web CN="Revoked Web CA"
   serial_after="$("$OPENSSL" x509 -in intm-web-ca/certs/ca.cert.pem -noout -serial | sed 's/^serial=//I')"
   [[ "$serial_before" != "$serial_after" ]] || die "Intermediate serial did not change after revoked intermediate reissue"

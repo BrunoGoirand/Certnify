@@ -28,6 +28,11 @@ The root profile is a source file, not data recovered from an operational root. 
 
 Smoke fixtures all live under one private temporary session and are removed on exit, including secondary cases. Commands run with a clean environment retaining only PATH, TMPDIR, OPENSSL and LC_ALL, so inherited CA paths, profile overrides and Make flags do not affect them. Use an absolute OPENSSL path or a binary available through PATH. Tests use generated keys only.
 
+Smoke requires `verify-intermediate-revoked` to succeed for an unrevoked
+intermediate and print the exact certificate-specific `: OK` line. After
+revocation it requires a nonzero exit, the revocation diagnostic and no success
+line. Output containing `OK` alone cannot override a failed command status.
+
 The snapshot helper records file hashes, permissions, link targets, index/counter contents, and SHA-256 identities of decoded certificates. It never prints private key bytes or follows links. Use it only on disposable fixtures:
 
 ```sh

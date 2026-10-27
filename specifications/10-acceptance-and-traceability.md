@@ -34,7 +34,7 @@ process termination and mocked barriers do not satisfy that qualification.
 | make test-stage10 | 11 | Hold release, verified installation recovery and workspace relocation |
 | make test-stage11 | 15 | Persistence ordering/errors, excluded-path admission, durable checkpoints, backend kill, safe resumption and CRL read/write admission |
 | make test-stage12 | 8 | Authority categories, compiled EKUs, custom profiles/paths, immutable category, batch admission, post-signing fencing and explicit generic command |
-| make test-smoke | Integration workflow | Kinds, profiles, SANs, issuance, revocation, rekey and CLI examples |
+| make test-smoke | Integration workflow | Kinds, profiles, SANs, issuance, revocation, rekey, CLI examples and intermediate verification status before/after revocation |
 
 The stage-numbered command names are stable test-suite identifiers, not an active
 implementation plan. The historical complete behavioral qualification on 2026-09-19
