@@ -32,7 +32,7 @@ process termination and mocked barriers do not satisfy that qualification.
 | make test-stage8 | 14 | Controlled cleanup, chain lifetime admission, DNS/IP/email/URI/subject and reference-time verification, CN-only batch and historical CRLs |
 | make test-stage9 | 5 | Preserving batch migration, fresh key parameters, source/profile admission and explicit compatibility mode |
 | make test-stage10 | 11 | Hold release, verified installation recovery and workspace relocation |
-| make test-stage11 | 13 | Persistence ordering/errors, excluded-path admission, durable checkpoints, backend kill and safe resumption |
+| make test-stage11 | 15 | Persistence ordering/errors, excluded-path admission, durable checkpoints, backend kill, safe resumption and CRL read/write admission |
 | make test-stage12 | 8 | Authority categories, compiled EKUs, custom profiles/paths, immutable category, batch admission, post-signing fencing and explicit generic command |
 | make test-smoke | Integration workflow | Kinds, profiles, SANs, issuance, revocation, rekey and CLI examples |
 

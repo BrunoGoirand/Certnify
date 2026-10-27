@@ -209,6 +209,14 @@ verify-intermediate-revoked runs verification with the root CRL: a valid unrevok
 intermediate succeeds and a revoked one fails. Its name does not invert success.
 Ordinary CRL operations do not publish remotely or add discovery extensions.
 
+`crl-show`, `show-intermediate-serial`, `crl-root-revoked` and
+`verify-intermediate-revoked` use read admission, including their direct-script
+equivalents. They acquire the workspace lock and retain recovery/durability
+admission checks, but create no new write intent and do not synchronize the
+workspace tree. An unrelated special file does not prevent these inspections.
+CRL generation (including historical renewal) and applied cleanup retain write
+admission; cleanup preview retains its existing nonmutating behavior.
+
 ## Explicit renewal of historical coverage
 
 `make crl-all CRL_HISTORY=1 CRL_DAYS=7` renews root, canonical issuers and retained

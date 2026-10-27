@@ -303,6 +303,10 @@ il n’inverse pas le succès de vérification. Les commandes `show-intermediate
 et `crl-root-revoked` permettent l’inspection avec un sélecteur d’autorité explicite.
 `crl-root-revoked` échoue si la CRL racine est absente ou malformée ; une CRL valide
 sans entrée révoquée réussit. Son affichage est informatif, pas une API d’appartenance.
+`crl-show`, `show-intermediate-serial`, `crl-root-revoked` et
+`verify-intermediate-revoked` utilisent l’admission en lecture : ils conservent le
+verrou du workspace et les contrôles de reprise sans ouvrir de transaction durable
+d’écriture ni synchroniser l’ensemble du workspace.
 
 ## Cycle de vie, lots et publication
 

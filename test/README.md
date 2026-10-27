@@ -128,6 +128,11 @@ reference-time validation, invalid timestamps and CRL time-window rejection.
 
 ## Durable operations
 
+Stage 11 also checks Make/direct CRL inspection admission: no call to durable
+write admission (even transiently), locking during backend inspection, tolerance
+of an unrelated FIFO, and rejection with pending journals, fences or held locks.
+Generation and applied cleanup must still enter write admission.
+
 `make test-stage11` checks intent/data/completion ordering, failed barriers,
 platform-specific full flush failures, checkpoint admission, special-file refusal,
 backend interruption without an issuance journal, interrupted sealed installation,

@@ -8,7 +8,10 @@ if [[ "$operation" == clean ]]; then
   clean_workspace
   exit 0
 fi
-pki_begin
+case "$operation" in
+  show|serial|root-revoked|verify-intermediate) pki_begin read ;;
+  *) pki_begin write ;;
+esac
 if [[ "${CRL_HISTORY:-0}" == 1 ]]; then
   [[ "$operation" == all || "$operation" == generate ]] || die "CRL_HISTORY=1 requires crl or crl-all"
   source "$ROOT_DIR/bin/pki-crl-history.sh"

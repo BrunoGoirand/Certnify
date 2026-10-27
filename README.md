@@ -283,6 +283,10 @@ verification success. Inspection helpers include `show-intermediate-serial` and
 `crl-root-revoked` with an explicit authority selector.
 `crl-root-revoked` fails if the root CRL is missing or malformed; a valid CRL
 without revoked entries succeeds. Its display is informational, not a membership API.
+`crl-show`, `show-intermediate-serial`, `crl-root-revoked` and
+`verify-intermediate-revoked` use read admission: they retain the workspace lock
+and recovery checks without starting a durable write transaction or synchronizing
+the whole workspace.
 
 ## Lifecycle, batches and publication
 

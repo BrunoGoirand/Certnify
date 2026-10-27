@@ -134,7 +134,11 @@ Under the workspace lock, each mutating command persists `.recovery/power-loss`
 and its containing directories **before** layout preparation or backend execution.
 This fence covers initialization, OpenSSL index/counter/newcerts updates, normal
 revocation/CRL operations, lifecycle moves, inventory and batch receipts, cleanup
-and relocation. Ordinary verification checks admission without creating a fence.
+and relocation. Ordinary verification and the CRL inspection commands (`crl-show`,
+`show-intermediate-serial`, `crl-root-revoked`, `verify-intermediate-revoked`) check
+admission under the workspace lock without creating a new fence or synchronizing
+the workspace tree. Pending recovery evidence still receives the same admission
+checks as other readers.
 Supported unlocked previews and recovery reporting remain read-only.
 
 On an orderly exit, including a reported ordinary command failure, the helper

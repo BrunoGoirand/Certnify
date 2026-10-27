@@ -150,6 +150,86 @@ class Integration(unittest.TestCase):
         path.chmod(0o700)
         return str(path)
 
+    def crl_inspection_commands(self):
+        for target, operation in [('crl-show', 'show'),
+                                  ('show-intermediate-serial', 'serial'),
+                                  ('crl-root-revoked', 'root-revoked'),
+                                  ('verify-intermediate-revoked', 'verify-intermediate')]:
+            yield ['make', target, 'KIND=web']
+            yield ['bash', 'bin/crl.sh', operation]
+
+    def test_crl_inspections_never_begin_durable_writes(self):
+        self.setup_ca()
+        self.make('crl-root')
+        self.make('crl', 'KIND=web')
+        # Fail at entry, detecting even an intent that would be retired on exit.
+        adapter = self.work / 'bin/pki-durable.sh'
+        adapter.write_text(adapter.read_text().replace(
+            'durability_begin() {',
+            'durability_begin() {\n  echo "write intent probe" >&2\n  return 79', 1))
+        wrapper = self.wrapper('''if [[ "$1" == crl || "$1" == x509 || "$1" == verify ]]; then
+  [[ -s "$ROOT_DIR/.locks/root-ca.lock/pid" ]] || exit 77
+  [[ ! -e "$ROOT_DIR/.recovery/power-loss" ]] || exit 78
+fi''')
+        before = snapshot(self.work)
+        for command in self.crl_inspection_commands():
+            with self.subTest(command=command):
+                result = self.run_cmd(command, KIND='web', OPENSSL=wrapper)
+                self.assertNotIn('write intent probe', result.stderr)
+                self.assertNotIn('Local state durably synchronized', result.stderr)
+                self.assertEqual(before, snapshot(self.work))
+        # An unrelated FIFO must not trigger the write-side storage traversal.
+        fifo = self.work / 'unrelated-fifo'
+        os.mkfifo(fifo)
+        try:
+            for command in self.crl_inspection_commands():
+                with self.subTest(fifo=True, command=command):
+                    self.run_cmd(command, KIND='web', OPENSSL=wrapper)
+        finally:
+            fifo.unlink()
+        self.assertEqual(before, snapshot(self.work))
+        # Generation and applied cleanup still require write admission.
+        for operation in ['root', 'generate', 'all', 'clean']:
+            with self.subTest(mutation=operation):
+                result = self.run_cmd(['bash', 'bin/crl.sh', operation], False,
+                                      KIND='web', CLEAN_APPLY='1')
+                self.assertIn('write intent probe', result.stderr)
+                self.assertEqual(before, snapshot(self.work))
+        self.make('clean')  # Cleanup preview remains outside write admission.
+        self.assertEqual(before, snapshot(self.work))
+
+    def test_crl_inspections_preserve_admission_guards(self):
+        self.setup_ca()
+        self.make('crl-root')
+        self.make('crl', 'KIND=web')
+        pending = self.work / '.recovery/pending'
+        pending.mkdir(parents=True)
+        for command in self.crl_inspection_commands():
+            with self.subTest(guard='journal', command=command):
+                before = snapshot(self.work)
+                result = self.run_cmd(command, False, KIND='web')
+                self.assertIn('Unresolved operation', result.stderr)
+                self.assertEqual(before, snapshot(self.work))
+        pending.rmdir()  # Remove only the empty sentinel created by this test.
+        store = durable.Store(self.work)
+        store.begin(str(os.getpid()))
+        for command in self.crl_inspection_commands():
+            with self.subTest(guard='fence', command=command):
+                before = snapshot(self.work)
+                result = self.run_cmd(command, False, KIND='web')
+                self.assertIn('Unresolved power-loss operation', result.stderr)
+                self.assertEqual(before, snapshot(self.work))
+        # A held lock takes precedence even when recovery evidence is pending.
+        lock = self.work / '.locks/root-ca.lock'
+        lock.mkdir()
+        (lock / 'pid').write_text(str(os.getpid()))
+        for command in self.crl_inspection_commands():
+            with self.subTest(guard='lock', command=command):
+                before = snapshot(self.work)
+                result = self.run_cmd(command, False, KIND='web', LOCK_TIMEOUT='0')
+                self.assertIn('Timeout waiting for', result.stderr)
+                self.assertEqual(before, snapshot(self.work))
+
     def test_intent_precedes_backend_and_normal_exit_clears_it(self):
         wrapper = self.wrapper('''if [[ "$1" == req && " $* " == *" -x509 "* ]]; then
   [[ -s "$ROOT_DIR/.recovery/power-loss" ]] || exit 77
