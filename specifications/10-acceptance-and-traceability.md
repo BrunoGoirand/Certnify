@@ -302,3 +302,21 @@ state changes. The environment matches the category validation above. These two
 methods are additional to its 29 distinct methods; other suites and smoke were not
 rerun for this follow-up. Make help, Bash/Python syntax, the updated 94-file source
 manifest and diff checks passed. No operational PKI was modified.
+
+## Publication cancellation follow-up (2026-10-27)
+
+On macOS with Python 3.15.2 and OpenSSL 3.5.9 explicitly selected via
+`OPENSSL=/usr/local/opt/openssl@3/bin/openssl`, `make test-stage0 test-stage13`
+passed all 5 and 7 methods respectively. The targeted shared-deadline/cancellation
+method also passed independently. Its four cancellation cases cover SIGTERM and
+SIGINT during upload and read-back, requiring failed status, no verified or
+subsequent artifact report, and no delayed descendant write. Cancellation uses
+an exception outside `OSError` so runtime OS-error handling cannot absorb it.
+
+The first suite attempt selected `/usr/local/bin/openssl`, now OpenSSL 4.1.0:
+stage 0 rejected that unsupported backend and stage 13 did not start. This was
+resolved for validation by selecting the installed OpenSSL 3 executable, not by
+changing the backend gate. Python 3.8 grammar checks of the changed Python files
+and `git diff --check` passed. No other suites or smoke were rerun; these tests
+use disposable files/PKIs and local hooks, not remote publication, power loss or
+qualification of other Python versions or platforms.

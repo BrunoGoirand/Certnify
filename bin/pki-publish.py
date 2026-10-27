@@ -15,6 +15,10 @@ import sys
 import time
 
 
+class PublicationCancelled(Exception):
+    """Explicit cancellation must not be swallowed by OS-error retry handlers."""
+
+
 def timeout_value(value):
     if not value.isascii() or not value.isdecimal() or not 1 <= int(value) <= 3600:
         raise ValueError('PUBLISH_TIMEOUT must be an integer from 1 to 3600 seconds')
@@ -99,7 +103,7 @@ def main():
             run_hook(fetch, name, deadline, expected)
             if fingerprint(Path(name)) != expected:
                 raise ValueError('Local artifact changed during publication')
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, PublicationCancelled) as error:
             print('artifact=' + name + ' status=failed', flush=True)
             raise ValueError(name + ': ' + str(error)) from error
         print('artifact=' + name + ' status=verified sha256=' + expected[1], flush=True)
@@ -109,11 +113,11 @@ def main():
 
 if __name__ == '__main__':
     def interrupted(signum, frame):
-        raise InterruptedError('Publication interrupted')
+        raise PublicationCancelled('Publication interrupted')
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
     try:
         main()
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, PublicationCancelled) as error:
         print('[ERR] ' + str(error), file=sys.stderr)
         sys.exit(1)

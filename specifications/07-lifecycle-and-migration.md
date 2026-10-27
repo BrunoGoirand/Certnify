@@ -204,6 +204,11 @@ success. The first failure stops the sequence; the receipt records `verified`
 `PUBLISH_TIMEOUT=60` is a shared deadline for all upload/read-back hooks, validated
 as 1–3600 seconds before any CRL mutation. Ordinary process-group descendants are
 killed on timeout, cancellation and completion; adapters must not daemonize.
+SIGTERM/SIGINT cancellation of the publication helper propagates independently
+of OS-error retry handling. During an upload or read-back it stops the sequence,
+reports the current artifact as failed and exits nonzero after process-group
+cleanup; that artifact must not subsequently be reported as verified.
+Cancellation does not roll back completed local or remote writes.
 The workspace lock remains held to keep local CRL state stable. After transfer,
 local fingerprints and CRL resume state are checked again. A timed-out attempt
 leaves the local CRL committed and releases the lock after normal durability

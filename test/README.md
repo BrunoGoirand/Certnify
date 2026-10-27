@@ -182,6 +182,9 @@ ancillary versus operational FIFO handling, old authority markers in ancillary
 trees, complete persistence coverage of nested retained state, preflight EIO,
 publication configuration admission, false upload success, blocked upload/read,
 oversized or wrong read-back, reader failure and verified idempotent retry.
+The shared-deadline test also sends SIGTERM and SIGINT during upload and read-back,
+requiring nonzero exit, a failed artifact report, no verified result or subsequent
+artifact, and termination of ordinary descendants before their delayed write.
 Only disposable keys and a local directory adapter are used; remote services,
 hardware power loss and Linux are not qualified by these tests.
 

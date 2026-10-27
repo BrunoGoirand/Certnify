@@ -357,6 +357,9 @@ exige `PUBLISH_CMD`, `PUBLISH_FETCH_CMD` et `ALLOW_ADMIN_HOOKS=1`.
 La commande de relecture émet les octets distants sur stdout ; les six artefacts
 doivent correspondre aux octets locaux. `PUBLISH_TIMEOUT=60` borne la séquence
 complète des hooks (1 à 3600 secondes).
+L’annulation du helper de publication par SIGTERM/SIGINT arrête les descendants
+ordinaires des hooks et renvoie un échec ; les écritures locales ou distantes déjà
+effectuées ne sont pas annulées.
 FINAL_CRL sélectionne un PEM versionné valide conservé pour retenter sans consommer
 un autre numéro de CRL. Son fichier local `.resume-state` doit correspondre au
 PEM, aux entrées révoquées et au prochain compteur de CRL. Une révocation ou une

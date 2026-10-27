@@ -332,7 +332,10 @@ By default it refuses unrevoked, unexpired indexed leaves. “Final” is adviso
 it does not retire the authority. Remote publication occurs only with an explicitly
 configured `PUBLISH_CMD`, `PUBLISH_FETCH_CMD` and `ALLOW_ADMIN_HOOKS=1`.
 The fetch command emits the remote bytes on stdout; all six artifacts must match
-the local bytes. `PUBLISH_TIMEOUT=60` bounds the whole hook sequence (1–3600 seconds). FINAL_CRL selects a retained
+the local bytes. `PUBLISH_TIMEOUT=60` bounds the whole hook sequence (1–3600 seconds).
+SIGTERM/SIGINT cancellation of the publication helper stops ordinary hook descendants
+and returns failure; completed local or remote writes are not rolled back.
+FINAL_CRL selects a retained
 valid versioned PEM to retry without consuming another CRL number. Its local
 `.resume-state` must match the PEM, revoked index entries and next CRL counter.
 A subsequent revocation or CRL generation attempt invalidates that retry; generate

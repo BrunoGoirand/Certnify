@@ -38,22 +38,40 @@ class Scope(unittest.TestCase):
             self.assertIn('upload-log', result.stderr)
             self.assertIn('deadline exceeded', result.stderr)
             self.assertLess(time.monotonic() - start, 8)
-            env.update(PUBLISH_CMD='echo ready > ready; sleep 2; touch leaked', PUBLISH_TIMEOUT='60')
-            process = subprocess.Popen(command, cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            try:
-                deadline = time.monotonic() + 5
-                while not (root / 'ready').exists() and time.monotonic() < deadline:
-                    time.sleep(0.02)
-                self.assertTrue((root / 'ready').exists())
-                process.send_signal(signal.SIGTERM)
-                process.communicate(timeout=5)
-                self.assertNotEqual(process.returncode, 0)
-                time.sleep(2.1)
-                self.assertFalse((root / 'leaked').exists())
-            finally:
-                if process.poll() is None:
-                    process.kill()
-                process.communicate(timeout=5)
+            for phase in ('upload', 'read-back'):
+                for sig in (signal.SIGTERM, signal.SIGINT):
+                    with self.subTest(phase=phase, signal=sig.name):
+                        case = root / (phase + '-' + sig.name)
+                        case.mkdir()
+                        for name in ('one', 'two'):
+                            (case / name).write_text('bytes')
+                        blocking = 'echo ready > ready; sleep 2; touch leaked'
+                        env.update(PUBLISH_TIMEOUT='60',
+                                   PUBLISH_CMD=blocking if phase == 'upload' else ':',
+                                   PUBLISH_FETCH_CMD=blocking + '; cat %FILE%' if phase == 'read-back' else 'cat %FILE%')
+                        process = subprocess.Popen(command, cwd=case, env=env,
+                                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                        try:
+                            deadline = time.monotonic() + 5
+                            while not (case / 'ready').exists() and time.monotonic() < deadline:
+                                time.sleep(0.02)
+                            self.assertTrue((case / 'ready').exists())
+                            # Let the parent enter its wait/selector before signalling.
+                            time.sleep(0.1)
+                            process.send_signal(sig)
+                            stdout, stderr = process.communicate(timeout=5)
+                            self.assertNotEqual(process.returncode, 0)
+                            self.assertIn('Publication interrupted', stderr)
+                            self.assertNotIn('Traceback', stderr)
+                            self.assertIn('artifact=one status=failed', stdout)
+                            self.assertNotIn('status=verified', stdout)
+                            self.assertNotIn('artifact=two', stdout)
+                            time.sleep(2.1)
+                            self.assertFalse((case / 'leaked').exists())
+                        finally:
+                            if process.poll() is None:
+                                process.kill()
+                            process.communicate(timeout=5)
 
     def test_annexes_are_not_synced_but_all_operational_history_is(self):
         with tempfile.TemporaryDirectory() as folder:
