@@ -105,3 +105,4 @@ test/stage14.py
 test/benchmark-durability.py
 test/backend-contract.py
 test/openssl-matrix.py
+test/backend_support.py

@@ -109,7 +109,7 @@ migration_preflight() (
   ' "$INT_CNF")"
   [[ "$copying" == copy ]] || die "Preserving migration requires copy_extensions = copy"
   "$OPENSSL" genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out "$stage/key.pem" >/dev/null 2>&1 || die "Cannot generate migration preflight key"
-  migration_request "$stage/key.pem" "$stage/request.pem" >/dev/null 2>&1 || die "Cannot preserve certificate request; migration requires OpenSSL 3.x"
+  migration_request "$stage/key.pem" "$stage/request.pem" >/dev/null 2>&1 || die "Cannot preserve certificate request; migration requires certificate-to-CSR subjectAltName copying (x509 -x509toreq -copy_extensions)"
   "$OPENSSL" x509 -req -in "$stage/request.pem" -signkey "$stage/key.pem" \
     -copy_extensions copy -extfile "$INT_CNF" -extensions "$EXT_SECTION" -days 1 \
     -out "$stage/candidate.pem" >/dev/null 2>&1 || die "Cannot compile destination migration profile: $EXT_SECTION"

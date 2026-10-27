@@ -321,7 +321,8 @@ and key parameters. Fresh keys are generated with the same algorithm, RSA size
 or EC curve; old private keys are not needed. Every row is checked before issuing,
 including in `DRY_RUN=1`. Missing evidence or incompatible profiles fail closed.
 Issuer, serial number, SKI/AKI and validity are renewed; `DAYS` still selects the
-new lifetime within the chain limits. This mode requires OpenSSL 3.x.
+new lifetime within the chain limits. This mode requires certificate-to-CSR extension copying with an admitted OpenSSL
+3.x or 4.1.x backend; the migration preflight verifies the required capability.
 For reviewed lossy reissuance from a TSV alone, use `REISSUE_MODE=cn-only`.
 Custom `ISSUE_CMD` commands require `ALLOW_ADMIN_HOOKS=1` and have no preservation guarantee.
 Per-item receipts block blind retries after uncertain results. See the

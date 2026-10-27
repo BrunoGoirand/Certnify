@@ -11,7 +11,6 @@ import json
 import os
 from pathlib import Path
 import platform
-import re
 import signal
 import subprocess
 import sys
@@ -20,6 +19,7 @@ import threading
 import time
 
 from workspace import copy_sources, snapshot
+from backend_support import supports_preserving_migration
 
 SOURCE = Path(__file__).resolve().parent.parent
 COMMON = (
@@ -30,7 +30,7 @@ COMMON = (
     ('stage8.py', 'Operations.test_application_identity_purpose_and_strict_crls'),
     ('stage12.py', 'IssuanceCategories.test_compiled_custom_profiles_missing_multiple_and_oid_alias_ekus'),
 )
-OPENSSL3 = ('stage9.py', 'Migration.test_complete_subject_sans_curve_fresh_key_dry_run_and_retry')
+MIGRATION = ('stage9.py', 'Migration.test_complete_subject_sans_curve_fresh_key_dry_run_and_retry')
 OUTPUT_LOCK = threading.Lock()
 
 
@@ -73,11 +73,11 @@ def check_backend(candidate):
     if not accepted or failures:
         return failures
     selection = list(COMMON)
-    if re.match(r'^OpenSSL 3\.', version):
-        selection.append(OPENSSL3)
+    if supports_preserving_migration(version):
+        selection.append(MIGRATION)
     else:
-        emit(dict(type='not_applicable', backend=backend, test=list(OPENSSL3),
-                  reason='Preserving migration requires OpenSSL 3.x; not qualification evidence'))
+        emit(dict(type='not_applicable', backend=backend, test=list(MIGRATION),
+                  reason='Preserving migration requires an admitted OpenSSL 3.x or 4.1.x backend; not qualification evidence'))
     for script, method in selection:
         started = time.monotonic()
         # Own the temporary tree and process group so a timeout cannot leave

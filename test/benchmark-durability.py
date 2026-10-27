@@ -16,7 +16,8 @@ import sys
 import tempfile
 import time
 
-from workspace import copy_sources
+from workspace import copy_sources, snapshot
+from backend_support import supports_preserving_migration
 
 SOURCE = Path(__file__).resolve().parent.parent
 
@@ -159,8 +160,18 @@ def main():
     if Path(runtime).resolve() != Path(sys.executable).resolve():
         parser.error('Run with the python3 selected by PATH')
     version = subprocess.check_output([backend, 'version'], env=env, text=True).strip()
-    if not version.startswith('OpenSSL 3.'):
-        parser.error('Preserving batch benchmark requires OpenSSL 3.x; found ' + version)
+    # Use the runtime gate before selecting a feature or creating a PKI. A
+    # separate version allowlist would drift from the executable/library policy.
+    with tempfile.TemporaryDirectory(prefix='certnify-benchmark-admission-') as directory:
+        work = Path(directory) / 'work'
+        copy_sources(SOURCE, work)
+        before = snapshot(work)
+        result = subprocess.run(['/bin/bash', '-c', 'source bin/pki-env.sh'],
+                                cwd=work, env=env, capture_output=True, timeout=30)
+        if result.returncode or snapshot(work) != before:
+            parser.error('OpenSSL backend failed nonmutating runtime admission')
+    if not supports_preserving_migration(version):
+        parser.error('Preserving batch benchmark requires an admitted OpenSSL 3.x or 4.1.x backend')
     metadata = dict(type='environment', platform=platform.platform(), python=sys.version.split()[0],
                     openssl=version, record_bytes=args.record_bytes,
                     instrumented=True, warm_cache=True,

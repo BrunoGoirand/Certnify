@@ -91,7 +91,10 @@ Fresh private keys are always generated in rotation mode; old private keys are n
 read. Ambient subject/SAN/profile/key options cannot replace the source values.
 The actual issued subject and extensions are checked again before installation;
 a post-commit mismatch leaves a recovery journal and a review-required receipt.
-This mode requires OpenSSL 3.x certificate-to-CSR extension copying. It does not
+This mode requires certificate-to-CSR extension copying on an admitted OpenSSL
+3.x or 4.1.x backend. The actual preflight remains authoritative: inability to
+preserve subjectAltName in the CSR is a capability failure, not a reason to fall
+back silently to cn-only mode. It does not
 add a Python runtime dependency.
 
 Issuer, serial number, signature, SKI/AKI and validity are renewed, not copied.

@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """Preserving migration regressions, exclusively in disposable workspaces."""
 import os
+import contextlib
+import importlib.util
+import io
+import json
 import shutil
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from workspace import copy_sources, snapshot
 
@@ -110,6 +116,13 @@ class Migration(unittest.TestCase):
         r = self.run_cmd(['make', 'reissue-leafs-web', 'DRY_RUN=1'], False, OPENSSL=str(backend))
         self.assertIn('Cannot decode original subject', r.stderr)
         self.assertEqual(before, snapshot(self.work))
+        backend.write_text('#!/bin/bash\nfor arg; do [[ "$arg" != -x509toreq ]] || exit 56; done\nexec ' +
+                           shlex.quote(self.backend) + ' "$@"\n')
+        before = snapshot(self.work)
+        r = self.run_cmd(['make', 'reissue-leafs-web', 'DRY_RUN=1'], False, OPENSSL=str(backend))
+        self.assertIn('migration requires certificate-to-CSR subjectAltName copying', r.stderr)
+        self.assertNotIn('requires OpenSSL 3.x', r.stderr)
+        self.assertEqual(before, snapshot(self.work))
         inventory = next((self.work / 'out').glob('web-leafs-*.tsv'))
         inventory.write_text(inventory.read_text().replace('first.example', 'wrong.example'))
         before = snapshot(self.work)
@@ -159,6 +172,95 @@ subjectAltName = critical,DNS:custom.example
         self.run_cmd(['make', 'reissue-leafs-web', 'INPUT=manual.tsv'], False)
         r = self.run_cmd(['make', 'reissue-leafs-web', 'INPUT=manual.tsv', 'REISSUE_MODE=cn-only'])
         self.assertIn('CN-only', r.stderr)
+
+
+class BackendTools(unittest.TestCase):
+    """Tool orchestration with mocked crypto work; real backends run separately."""
+
+    def load_tool(self, name):
+        spec = importlib.util.spec_from_file_location(name, SOURCE / 'test' / (name + '.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_matrix_selection_and_migration_failure_status(self):
+        matrix = self.load_tool('openssl-matrix')
+        for version, count, fail in [('3.5.9', 7, False), ('4.1.0', 7, False),
+                                     ('1.1.1w', 6, False), ('4.1.0', 7, True)]:
+            with self.subTest(version=version, fail=fail):
+                def process(command, **kwargs):
+                    result = mock.MagicMock()
+                    result.__enter__.return_value = result
+                    result.returncode = int(fail and command[-1] == matrix.MIGRATION[1])
+                    result.communicate.return_value = ('', '')
+                    return result
+
+                output = io.StringIO()
+                # /bin/sh supplies only a real path/hash for the CLI identity
+                # plumbing; all backend and test-process execution is mocked.
+                with mock.patch.object(sys, 'argv', ['matrix', '--backend', '/bin/sh']), \
+                     mock.patch.object(matrix.subprocess, 'check_output', return_value='OpenSSL ' + version), \
+                     mock.patch.object(matrix.platform, 'platform', return_value='test-platform'), \
+                     mock.patch.object(matrix.subprocess, 'run', return_value=mock.Mock(returncode=0)), \
+                     mock.patch.object(matrix.subprocess, 'Popen', side_effect=process), \
+                     contextlib.redirect_stdout(output):
+                    status = matrix.main()
+                records = [json.loads(line) for line in output.getvalue().splitlines()]
+                tests = [row for row in records if row['type'] == 'test']
+                skipped = [row for row in records if row['type'] == 'not_applicable']
+                self.assertEqual(len(tests), count)
+                self.assertEqual(len(skipped), int(version == '1.1.1w'))
+                if count == 7:
+                    self.assertEqual(tests[-1]['test'], list(matrix.MIGRATION))
+                    self.assertEqual(tests[-1]['passed'], not fail)
+                self.assertEqual(status, int(fail))
+                self.assertEqual(records[-1]['passed'], not fail)
+                self.assertEqual(records[-1]['failures'], int(fail))
+
+    def test_benchmark_admission_selection_and_sample_failure(self):
+        benchmark = self.load_tool('benchmark-durability')
+        for version, admitted, sample_failure in [('3.5.9', True, False),
+                ('4.1.0', True, False), ('1.1.1w', True, False),
+                ('4.2.0', False, False), ('4.1.0-beta1', False, False),
+                ('4.1.0', False, False), ('4.1.0', True, True)]:
+            with self.subTest(version=version, admitted=admitted, failure=sample_failure):
+                with mock.patch.object(sys, 'argv', ['benchmark', '--rows', '1', '--history-files', '0', '--repeat', '1']), \
+                     mock.patch.object(benchmark.shutil, 'which', return_value='/bin/sh'), \
+                     mock.patch.object(benchmark.platform, 'platform', return_value='test-platform'), \
+                     mock.patch.object(benchmark.subprocess, 'check_output', side_effect=[sys.executable, 'OpenSSL ' + version]), \
+                     mock.patch.object(benchmark.subprocess, 'run', return_value=mock.Mock(returncode=0 if admitted else 1)) as admission, \
+                     mock.patch.object(benchmark, 'sample', return_value={'rows': 1}) as sample, \
+                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    if not admitted or version == '1.1.1w':
+                        with self.assertRaises(SystemExit) as error:
+                            benchmark.main()
+                        self.assertEqual(error.exception.code, 2)
+                        sample.assert_not_called()
+                    elif sample_failure:
+                        sample.side_effect = RuntimeError('Fixture command failed')
+                        with self.assertRaisesRegex(RuntimeError, 'Fixture command failed'):
+                            benchmark.main()
+                    else:
+                        benchmark.main()
+                        sample.assert_called_once()
+                    admission.assert_called_once()
+                    self.assertEqual(admission.call_args[0][0],
+                                     ['/bin/bash', '-c', 'source bin/pki-env.sh'])
+
+    def test_benchmark_invalid_arguments_never_probe_or_sample(self):
+        benchmark = self.load_tool('benchmark-durability')
+        for arguments in [['--repeat', '0'], ['--rows', '0'],
+                          ['--history-files', '-1'], ['--record-bytes', '0']]:
+            with self.subTest(arguments=arguments):
+                with mock.patch.object(sys, 'argv', ['benchmark'] + arguments), \
+                     mock.patch.object(benchmark.subprocess, 'check_output') as probe, \
+                     mock.patch.object(benchmark, 'sample') as sample, \
+                     contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as error:
+                        benchmark.main()
+                    self.assertEqual(error.exception.code, 2)
+                    probe.assert_not_called()
+                    sample.assert_not_called()
 
 
 if __name__ == '__main__':

@@ -7,6 +7,9 @@ of the durability helper. See [test/README.md](../test/README.md) for execution 
 
 ## OpenSSL 4.1 admission slice 1 (2026-10-27)
 
+This section records the end-of-slice-1 state. The subsequent
+[tooling slice](#openssl-41-tooling-slice-2-2026-10-27) removes its 3.x-only tool restrictions.
+
 The shared version gate now admits stable 1.1.1, 3.x and 4.1.x releases under the
 [complete-banner policy](09-compatibility-and-limitations.md#openssl-backend-admission).
 Other families, prereleases, vendor-suffixed tokens, malformed responses and
@@ -48,6 +51,67 @@ matrix's migration selector and the durability benchmark remain unchanged and
 3.x-only pending slice 2. Admission must not be described as completed 4.1.x
 functional qualification.
 
+## OpenSSL 4.1 tooling slice 2 (2026-10-27)
+
+`test/backend_support.py` now supplies the shared post-admission feature selector
+for the matrix and benchmark. Admitted 3.x/4.1.x backends select preserving
+migration; 1.1.1 does not. Runtime admission remains authoritative: the matrix
+already checked it, and the benchmark now checks it in a manifest-only disposable
+source package and asserts an unchanged snapshot before creating any PKI.
+The benchmark still rejects invalid sample parameters. Matrix identity reporting,
+alias handling, per-method timeouts, process-group cleanup and failure status are
+unchanged. No test is silently skipped to make a supported migration backend pass.
+
+The migration preflight still actually copies subjectAltName from certificate to
+CSR. Its failure diagnostic now identifies this required capability rather than
+claiming that only version 3 can provide it. An injected `-x509toreq` failure in
+the existing stage-9 rejection scenario checks the message and unchanged PKI.
+
+Validation uses macOS 26.7.1 x86_64, Bash 3.2.57, GNU Make 3.81, Python 3.15.2 and
+the real `/usr/local/bin/openssl` resolving to
+`/usr/local/Cellar/openssl@4/4.1.0/bin/openssl` (OpenSSL 4.1.0).
+
+Executed targeted checks:
+
+- `python3 -B test/stage9.py BackendTools -v`: 3/3 passed. These mock backend/test
+  execution to check seven selected methods on 3.x/4.1.x, six plus an explicit
+  inapplicable entry on 1.1.1, matrix status 1 for an injected migration failure,
+  benchmark admission/feature refusal, propagated sample failure and invalid
+  arguments. They are orchestration regressions, not crypto qualification.
+- `OPENSSL=/usr/local/bin/openssl make test-stage0`: 5/5 passed, including the
+  explicit manifest entry for the new helper and updated stage-9 method count.
+- `OPENSSL=/usr/local/bin/openssl python3 -B test/stage9.py Migration.test_missing_metadata_stale_inventory_and_policy_drift_fail_without_mutation -v`:
+  passed, including the new copy-capability failure injection.
+- `OPENSSL=/tmp/certnify-r3-openssl.sSpJ2u/install/bin/openssl python3 -B test/benchmark-durability.py --rows 1 --history-files 0 --repeat 1`:
+  expected status 2 on real 1.1.1w, before samples. This temporary installation is
+  the complete installation described in the historical backend matrix.
+- `python3 -B test/openssl-matrix.py --backend /usr/local/bin/openssl > /tmp/certnify-openssl4-slice2-matrix.jsonl`:
+  exit 0, nonmutating bootstrap admitted, all seven
+  [selected methods](../test/README.md#openssl-backend-matrix) passed, including
+  `Migration.test_complete_subject_sans_curve_fresh_key_dry_run_and_retry`.
+  The JSONL report contains seven test records, no `not_applicable` record, and
+  a successful summary with zero failures. Executable SHA-256:
+  `ba60e673f9c8487e653afa4f6690d52baeab61c2443c708bc9f11f8a72628561`.
+- After that functional matrix passed,
+  `OPENSSL=/usr/local/bin/openssl python3 -B test/benchmark-durability.py --rows 1 --history-files 0 --repeat 1 > /tmp/certnify-openssl4-slice2-benchmark.jsonl`:
+  exit 0, one completed sample. The benchmark verified completed receipts,
+  destination issuance count, absence of blocking recovery state and the final
+  chain. The timed batch took 15.13 seconds with 14 tree scans, 1673 sync calls
+  and 23 full-barrier calls. This single instrumented warm-cache sample verifies
+  that the tool works on 4.1.0; it is not throughput or power-loss qualification.
+  Both `/tmp` JSONL files are ephemeral local evidence, not source artifacts.
+
+Shell syntax (`bash -n bin/pki-migration.sh`), Python 3.8 grammar for the changed
+test tools/helper, local documentation targets and `git diff --check` passed.
+
+The first orchestration-test attempt failed because a subprocess mock also
+intercepted Python's platform probe. Isolating that metadata probe fixed the test
+harness; the final three methods passed. It was not a real-backend failure.
+
+Full stage-9 coverage, mixed-backend lifecycle and complete platform qualification
+remain for subsequent slices. No live authority, real power loss or remote
+publication was exercised.
+
 ## Executable gates
 
 The exclusive-writer requirement in chapter 01 also needs deployment acceptance:
@@ -73,7 +137,7 @@ process termination and mocked barriers do not satisfy that qualification.
 | make test-stage6 | 16 | Interrupted commits, killed issuer, preserved replacements, publication resume, rollover generator ownership and cleanup handoff |
 | make test-stage7 | 13 | Audit A01–A06, state loss, Make transport, key strength, SAN equality and UTF-8 |
 | make test-stage8 | 14 | Controlled cleanup, chain lifetime admission, DNS/IP/email/URI/subject and reference-time verification, CN-only batch and historical CRLs |
-| make test-stage9 | 5 | Preserving batch migration, fresh key parameters, source/profile admission and explicit compatibility mode |
+| make test-stage9 | 8 | Preserving batch migration, fresh key parameters, source/profile admission and explicit compatibility mode |
 | make test-stage10 | 11 | Hold release, verified installation recovery and workspace relocation |
 | make test-stage11 | 15 | Persistence ordering/errors, excluded-path admission, durable checkpoints, backend kill, safe resumption and CRL read/write admission |
 | make test-stage12 | 8 | Authority categories, compiled EKUs, custom profiles/paths, immutable category, batch admission, post-signing fencing and explicit generic command |

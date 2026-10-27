@@ -68,10 +68,9 @@ selected `OPENSSL`; stage 0 also tests real Make root creation.
 
 ## OpenSSL backend matrix
 
-OpenSSL 4.1.x now passes runtime admission, but this tool's migration selection
-and the durability benchmark still require the separate tooling update: the
-matrix currently marks migration inapplicable for 4.1.x. Do not interpret its six
-common methods as complete 4.1.x coverage. See the
+Admitted OpenSSL 3.x and 4.1.x backends run seven methods, including preserving
+migration. The benchmark uses the same feature selector after checking runtime
+admission in a manifest-only disposable source package. See the
 [admission contract](../specifications/09-compatibility-and-limitations.md#openssl-backend-admission).
 
 The opt-in matrix tests actual executables, not directory labels or mocked version
@@ -81,6 +80,7 @@ strings. Supply paths explicitly; it neither downloads nor installs a backend:
 python3 -B test/openssl-matrix.py \
   --backend /absolute/path/to/openssl-1.1.1 \
   --backend /absolute/path/to/openssl-3 \
+  --backend /absolute/path/to/openssl-4.1 \
   --reject-backend /absolute/path/to/libressl \
   --jobs 2 > /tmp/certnify-openssl-matrix.jsonl
 ```
@@ -105,7 +105,7 @@ The common selection is six methods:
 | `stage8.py Operations.test_application_identity_purpose_and_strict_crls` | DNS/IP/purpose checks and strict full-chain CRL verification |
 | `stage12.py IssuanceCategories.test_compiled_custom_profiles_missing_multiple_and_oid_alias_ekus` | ASN.1 extension decoding, compiled profiles, missing/multiple EKUs and OID aliases |
 
-OpenSSL 3.x additionally runs
+Admitted OpenSSL 3.x and 4.1.x additionally run
 `stage9.py Migration.test_complete_subject_sans_curve_fresh_key_dry_run_and_retry`.
 Preserving migration is explicitly not applicable on 1.1.1; that entry is not
 counted as a passed test. The portable CRL case corrupts DER signature bytes and
@@ -188,7 +188,12 @@ recorded in the [acceptance map](../specifications/10-acceptance-and-traceabilit
 full UTF-8 subjects, mixed SANs, key rotation/parameters, S/MIME profile variants,
 absent/critical SANs, custom profiles and extended subjects, dry-run immutability,
 retry receipts, missing metadata, policy drift and backend decoding failure.
-Requires OpenSSL 3.x. Compatibility adapter tests explicitly select `cn-only`.
+Requires an admitted OpenSSL 3.x or 4.1.x backend with certificate-to-CSR
+extension copying. Compatibility adapter tests explicitly select `cn-only`.
+The three `BackendTools` methods exercise tool orchestration with mocked backend
+execution: seven versus six selected methods, migration failure/CLI status,
+benchmark admission, sample failure and invalid-argument rejection. These are
+not additional real-backend crypto qualification scenarios.
 
 ## Hold release, verified recovery and workspace relocation
 
@@ -234,7 +239,8 @@ for the precise incremental-validation and hardware/platform limits.
 ## Retained-history performance measurement
 
 Run the opt-in benchmark from the repository root, selecting an accepted OpenSSL
-3.x executable (preserving migration requires 3.x):
+3.x or 4.1.x executable (preserving migration requires certificate-to-CSR
+extension copying):
 
 ```sh
 OPENSSL=/absolute/path/to/openssl python3 -B test/benchmark-durability.py \

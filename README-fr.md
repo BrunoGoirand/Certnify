@@ -346,7 +346,9 @@ RSA ou la même courbe EC. Les anciennes clés privées ne sont pas nécessaires
 Tout le lot est vérifié avant émission, y compris avec `DRY_RUN=1` ; une preuve
 manquante ou un profil incompatible provoque un refus. Le numéro de série,
 l’émetteur, les identifiants SKI/AKI et la validité sont renouvelés (`DAYS` reste
-applicable dans les limites de la chaîne). Ce mode nécessite OpenSSL 3.x.
+applicable dans les limites de la chaîne). Ce mode nécessite la copie des extensions du certificat vers la CSR avec un
+backend OpenSSL 3.x ou 4.1.x admis ; le contrôle préalable de migration vérifie
+cette capacité.
 L’ancien comportement reste accessible explicitement avec `REISSUE_MODE=cn-only`.
 Une commande personnalisée `ISSUE_CMD` exige `ALLOW_ADMIN_HOOKS=1` et ne bénéficie pas de cette garantie.
 Les reçus par élément bloquent les reprises aveugles après un résultat incertain. Voir la

@@ -61,7 +61,8 @@ OpenSSL 3.6.4 and Python 3.14.7. The executable gate accepts stable OpenSSL 1.1.
 and rejects LibreSSL and other release families; acceptance is not testing or a
 vendor-support claim. The opt-in [backend matrix](../test/README.md#openssl-backend-matrix) exercises
 real executable identities against the ASN.1, key metadata, CRL, date and strict
-verification contracts, with preserving migration tested separately on 3.x.
+verification contracts, with preserving migration selected on admitted 3.x and
+4.1.x backends.
 Aliases of one installed executable do not qualify additional versions.
 Current targeted results and untested combinations are recorded in
 [chapter 10](10-acceptance-and-traceability.md#openssl-backend-matrix-2026-10-27).
@@ -96,8 +97,11 @@ operation fence. Rejected identities and failed/missing version commands must
 leave fixture state unchanged, including in shell contexts that suppress errexit.
 
 OpenSSL 4.1.x is admitted at this stage; full functional and mixed-backend lifecycle
-qualification is still pending. The backend matrix's migration selection and the
-preserving-batch benchmark remain 3.x-only until the separate tooling slice is
-implemented. A matrix result without that migration scenario cannot establish
-4.1.x migration coverage. Existing migration preflight and cryptographic policy
-are unchanged. See the [slice-1 evidence](10-acceptance-and-traceability.md#openssl-41-admission-slice-1-2026-10-27).
+qualification is still pending. The backend matrix selects seven methods for
+admitted 3.x and 4.1.x, including preserving migration; 1.1.1 retains six common
+methods and an explicit inapplicable migration record. The benchmark uses the
+same feature selector after nonmutating runtime admission in a disposable source
+package. Neither tool treats version selection as proof of feature behavior.
+The actual migration preflight and cryptographic policy remain unchanged. See
+the [slice-1 evidence](10-acceptance-and-traceability.md#openssl-41-admission-slice-1-2026-10-27)
+and [slice-2 evidence](10-acceptance-and-traceability.md#openssl-41-tooling-slice-2-2026-10-27).
