@@ -1,5 +1,7 @@
 # Recoverable boundaries with a durable command fence; no database rollback (MIT).
 # Process-local ownership must never be inherited from the caller environment.
+# Initialized once by pki-env.sh. OWNED marks this shell's pending journal;
+# OPERATION_COMPLETE permits its retirement only on a successful exit.
 PKI_RECOVERY_OWNED=""
 PKI_OPERATION_COMPLETE=0
 recovery_guard() {
@@ -62,6 +64,9 @@ recovery_signing() {
   recovery_phase signing-outcome-uncertain
 }
 recovery_complete() { PKI_OPERATION_COMPLETE=1; }
+# Terminal cleanup: consumes command status and ownership flags, preserves
+# uncertain journals/fences, releases owned locks, removes EXIT and exits.
+# A command cleanup trap must save its status before cleanup and call this once.
 pki_exit() {
   local rc="$1"
   # A terminated backend may have stopped between its own database writes.

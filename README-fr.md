@@ -51,6 +51,11 @@ en charge macOS et Linux sur un seul système de fichiers local et refuse les
 barrières non prises en charge. Les écritures externes, notamment celles d’un
 agent de synchronisation sur l’état PKI actif, sont interdites.
 
+Des versions supplémentaires peuvent être vérifiées avec la
+[matrice OpenSSL optionnelle](test/README.md#openssl-backend-matrix).
+Ses résultats ciblés de compatibilité sont distincts d’une qualification complète
+de la plateforme.
+
 ## Démarrage rapide
 
 Utiliser un workspace neuf pour cet exemple. Il crée une racine et un intermédiaire
@@ -431,6 +436,12 @@ et génèrent leurs propres clés. Ils couvrent analyse des entrées, politiques
 concurrence, révocation et pannes injectées ; la publication utilise des simulations
 locales. Voir [test/README.md](test/README.md) pour l’exécution et les
 [critères d’acceptation](specifications/10-acceptance-and-traceability.md) pour les limites.
+
+Pour les historiques volumineux, le
+[benchmark optionnel de durabilité par lot](test/README.md#retained-history-performance-measurement)
+mesure le coût des synchronisations dans des fixtures jetables avant de dimensionner
+les lots. Les opérations modificatrices synchronisent toujours tout l’état non exclu
+du workspace.
 
 `make clean` affiche désormais un aperçu sans modifier le workspace. Après examen
 des chemins et sauvegarde si nécessaire, `make clean CLEAN_APPLY=1` supprime root,

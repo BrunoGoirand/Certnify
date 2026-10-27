@@ -1,4 +1,7 @@
 # Durable command fence. Ownership is process-local, never trusted from env (MIT).
+# Initialized once by pki-env.sh. OWNED is the fence ID; KEEP retains it on
+# interruption; COMPLETED permits the final durable-success acknowledgment.
+# begin/finish mutate this state in the owning shell, never in a subshell.
 PKI_DURABLE_OWNED=""
 PKI_DURABLE_KEEP=0
 PKI_DURABLE_COMPLETED=0

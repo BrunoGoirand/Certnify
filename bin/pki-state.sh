@@ -1,5 +1,9 @@
 # Certnify state/path/generation helpers. Sourced by pki-env.sh (MIT).
 # One physical-workspace lock intentionally serializes every PKI transaction.
+# In: access=read|write (default write), fully bootstrapped shell context.
+# Out: cwd=ROOT_DIR, owned workspace lock and standard EXIT/INT/TERM traps;
+# write access also owns a durable fence. Same-shell re-entry keeps ownership
+# but reinstalls these traps: command-specific cleanup must be installed after.
 pki_begin() {
   local access="${1:-write}"
   case "$access" in read|write) ;; *) die "Invalid transaction access mode: $access" ;; esac

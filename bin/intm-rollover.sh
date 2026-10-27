@@ -34,6 +34,8 @@ if [[ -e "$BASE_DIR" ]]; then
   normalize_ca_artifacts "$LEGACY_DIR"
   info "Preserved generation: $LEGACY_DIR"
 fi
-# Run the normal generator in this shell, retaining the transaction lock.
+# Terminal same-shell handoff: the generator shares lock/fence/journal ownership
+# and takes over EXIT cleanup. It may exit on an idempotent path; do not append
+# caller work here. CN and normalized key/lifetime inputs above are its request.
 INT_DIR="$BASE_DIR"
 source "$ROOT_DIR/bin/gen-intm.sh"

@@ -23,11 +23,11 @@ process termination and mocked barriers do not satisfy that qualification.
 | --- | ---: | --- |
 | make test-stage0 | 5 | Source manifest, exclusions, root bootstrap, snapshots, current test-map consistency |
 | make test-stage1 | 10 | Strict record parsing, serial arithmetic, CN selection, inventories |
-| make test-stage2 | 9 | Canonical paths, generations, concurrency, rollover/rollback |
+| make test-stage2 | 12 | Canonical paths, generations, concurrency, rollover/rollback, completed bootstrap and same-shell ownership/trap contracts |
 | make test-stage3 | 8 | Actual command adapters, batch outcomes/receipts, FILE/CHAIN |
 | make test-stage4 | 11 | Trust/CRL errors, idempotent revocation, read-only plans, failed refresh, root CRL display errors and empty/revoked lists |
 | make test-stage5 | 10 | Effective key/profile matrix, SANs, names, configuration completeness |
-| make test-stage6 | 15 | Interrupted commits, killed issuer, preserved replacements, publication resume |
+| make test-stage6 | 16 | Interrupted commits, killed issuer, preserved replacements, publication resume, rollover generator ownership and cleanup handoff |
 | make test-stage7 | 13 | Audit A01–A06, state loss, Make transport, key strength, SAN equality and UTF-8 |
 | make test-stage8 | 14 | Controlled cleanup, chain lifetime admission, DNS/IP/email/URI/subject and reference-time verification, CN-only batch and historical CRLs |
 | make test-stage9 | 5 | Preserving batch migration, fresh key parameters, source/profile admission and explicit compatibility mode |
@@ -47,6 +47,212 @@ The stage-numbered command names are stable test-suite identifiers, not an activ
 implementation plan. The historical complete behavioral qualification on 2026-09-19
 passed all 55 regression scenarios and smoke on the platform listed in chapter 09.
 This records test scope, not a guarantee for untested systems or every failure point.
+
+## Retained-history measurement (2026-10-27)
+
+Risk R1 concerns repeated full-workspace persistence, not an established loss of
+durability. `test/benchmark-durability.py` now provides an opt-in measurement with
+real preserving batches and synthetic retained regular files; see the
+[method and command](../test/README.md#retained-history-performance-measurement).
+The benchmark asserts successful issuance, completed per-item receipts, no
+blocking recovery state, valid resulting chains, and persistence of every
+synthetic historical file on every tree scan. It changes only the copied helper
+inside each fixture, delegates every actual barrier, and exports aggregate data.
+
+The measurement uses macOS 26.7.1 x86_64, Bash 3.2.57, GNU Make 3.81, Python
+3.15.2 and OpenSSL 3.5.9 selected through
+`OPENSSL=/usr/local/opt/openssl@3/bin/openssl`. The default executable currently
+reports OpenSSL 4.1.0 and was correctly refused by the backend gate; an initial
+stage-0 run therefore passed four tests and failed root bootstrap. With the
+explicit 3.x backend, full stage0 (5 tests) and stage11 (15 tests) passed.
+The benchmark also rejects a nonpositive repetition count and OpenSSL 4.x before
+fixture creation. Python 3.8 grammar and local documentation link targets were
+checked; this is not execution under Python 3.8. No full-suite or smoke rerun is
+claimed for this test-tooling change.
+
+The observed preserving workflow performs an initial admission/completion pair,
+then three transactions per row (claim, issuance, receipt completion). Issuance
+also flushes five recovery phases and seals one checkpoint. Thus the measured
+cases perform `2 + 12 * rows` full tree scans: 14 for one row and 38 for three.
+An additional history of H files incurs H synchronizations per scan (14,000 and
+38,000 additional file synchronizations respectively for H=1,000). The helper
+invocation counts are 4/10 `begin`, 4/10 `finish`, 5/15 `flush` and 1/3 `seal` for
+one/three rows. These counts describe successful fresh attempts in this workflow,
+not every operation or retry mode.
+
+Executed command (18 successful samples, 36 reissued leaves):
+
+```sh
+OPENSSL=/usr/local/opt/openssl@3/bin/openssl python3 -B test/benchmark-durability.py \
+  --rows 1 3 --history-files 0 100 1000 --repeat 3 \
+  > /tmp/certnify-r1-benchmark.jsonl
+```
+
+These measurements preceded the shell-context mitigation below; the performance
+matrix was not rerun after that change.
+Each added file contains 4,096 bytes. The table uses only repetitions 2 and 3,
+run without concurrent test suites. Repetition 1 overlapped stage0/stage11 and is
+excluded from timing comparisons; its correctness/count assertions also passed.
+Values are medians with observed minimum–maximum in parentheses, in seconds.
+Two retained repetitions provide a small local observation, not a confidence
+interval or a throughput service level.
+
+| Batch rows | Added history files | Full scans | Whole batch seconds | Tree-walk seconds, including their sync calls |
+| ---: | ---: | ---: | --- | --- |
+| 1 | 0 | 14 | 15.313 (14.970–15.655) | 0.289 (0.287–0.290) |
+| 1 | 100 | 14 | 15.696 (15.068–16.324) | 0.472 (0.448–0.496) |
+| 1 | 1,000 | 14 | 17.335 (16.525–18.146) | 2.047 (1.999–2.095) |
+| 3 | 0 | 38 | 40.804 (40.750–40.858) | 1.070 (1.065–1.074) |
+| 3 | 100 | 38 | 41.341 (41.169–41.513) | 1.550 (1.549–1.551) |
+| 3 | 1,000 | 38 | 45.526 (45.403–45.650) | 5.712 (5.693–5.730) |
+
+For three rows, adding 1,000 files adds about 4.64 seconds of tree-walk time and
+4.72 seconds of total batch time when comparing these medians. This confirms a
+measurable history-dependent cost and its amplification by repeated scans. R1 is
+now reproducible and quantified for this fixture; the growing cost remains a
+known design limitation. No performance threshold or target deployment volume
+was supplied, so this observation does not establish a capacity limit or justify
+a new persistence protocol on its own.
+
+The synchronization protocol and scope are unchanged. CRL inspection already
+uses read admission in this revision, so it does not incur these write barriers.
+Historical authorities and completed recovery journals must remain covered;
+excluding them or caching an unchanged-file decision without a durable
+write-tracking protocol would require separate design and failure qualification.
+Use measurements at the intended history size and storage to budget operational
+batch time. The synthetic history, small EC batches, warm caches and probe
+overhead limit extrapolation; these results do not qualify large real deployments,
+cold storage, power loss, remote services or network filesystems.
+
+## Shell-context coupling mitigation (2026-10-27)
+
+Risk R2 is bounded by the explicit
+[bootstrap and ownership contract](08-architecture-and-reliability.md#shell-bootstrap-and-ownership-contract)
+and new regression coverage. Bootstrap now recognizes a final readonly,
+nonexported readiness marker instead of treating the existence of `pki_begin`
+as proof that all helpers and ownership initialization have loaded.
+
+`ShellContext.test_bootstrap_does_not_trust_function_presence_or_inherited_state`
+fails against the previous HEAD helper in a manifest-copied disposable fixture
+and passes with the new helper. It covers a preexisting/exported function,
+inherited marker/ownership values and initialization in a fresh child Bash.
+It also removes one helper in a disposable copy and requires a nonzero exit
+without a readiness marker. This additional case exposed Bash 3.2 reporting zero
+to an EXIT trap when `source` cannot open a file; the ordered loader now checks
+helper presence/readability explicitly before sourcing.
+Two further ShellContext methods cover re-sourcing with active ownership and
+custom traps, nested admission/journaling, normal cleanup, ordinary error,
+SIGTERM/SIGINT and blocked retry without state changes.
+`Recovery.test_rollover_handoff_keeps_one_owner_and_generator_cleanup` checks
+the actual same-shell handoff, the generator's EXIT cleanup on success and
+signing failure, retained issuer history and refusal of blind retry.
+
+The global-state architecture remains in place. The change makes bootstrap
+completion explicit and provides executable boundaries around ownership and
+traps; it does not introduce a returning generator API or distributed locks.
+All instrumentation and generated PKI material belong to disposable fixtures.
+
+Validation used macOS, Bash 3.2.57, GNU Make 3.81, Python 3.15.2 and OpenSSL
+3.5.9, selected with `OPENSSL=/usr/local/opt/openssl@3/bin/openssl`:
+
+| Executed gate | Result |
+| --- | --- |
+| `make test-stage0` | 5/5 passed |
+| `make test-stage2` | 12/12 passed |
+| `make test-stage3` | 8/8 passed |
+| `make test-stage6` | 16/16 passed |
+| `make test-stage11` | 15/15 passed |
+
+This is incremental validation of 56 distinct methods, not the complete suite.
+The missing-helper preflight was added while stage2 was already running;
+stage0 and all three ShellContext methods were rerun successfully against the
+final loader. Stages 3, 6 and 11 then ran with that loader, including the real
+rollover handoff test. Targeted reruns are not counted as additional methods.
+`bash -n` passed for the five changed shell files; both changed Python test files
+parse with the Python 3.8 grammar. Local documentation link targets and
+`git diff --check` passed. Smoke and the other suites were not rerun; no actual
+power-loss, network-filesystem or remote-publication qualification is implied.
+
+## OpenSSL backend matrix (2026-10-27)
+
+Risk R3 now has an opt-in executable compatibility gate,
+`test/openssl-matrix.py`, with six common behavioral methods and one additional
+preserving-migration method on OpenSSL 3.x. The
+[selection and execution contract](../test/README.md#openssl-backend-matrix)
+cover ASN.1 extensions, key metadata, CRL issuer/signature/date parsing, strict
+verification and failure interpretation. A new portable CRL method checks the
+inclusive lastUpdate and exclusive nextUpdate boundaries, corrupted signatures,
+wrong issuers and malformed/missing inputs without state changes.
+
+The matrix records real executable paths, versions and binary hashes. On this
+host, `/usr/local/opt/openssl@3.2` through `openssl@3.6` all resolve to the
+installed 3.5.9 executable; the extra `--backend .../openssl@3.2/bin/openssl`
+argument was reported as an alias, not another tested version. Conflicting
+accept/reject expectations for those aliases return status 2 before fixtures.
+Intentionally expecting LibreSSL to be accepted produces a failed admission
+record and matrix status 1; a failed probe is not silently skipped.
+
+Environment: macOS 26.7.1 x86_64, Bash 3.2.57, GNU Make 3.81, Python 3.15.2.
+OpenSSL 3.5.9 and 4.1.0 came from the existing local installation; LibreSSL 3.3.6
+was `/usr/bin/openssl`. OpenSSL 1.1.1w was built from the
+[official archived release](https://mta.openssl.org/pipermail/openssl-announce/2023-September/000274.html),
+whose archive SHA-256 was verified as
+`cf3098950cb4d853ad95c0841f1f9c6d3dc102dccfcacd521d93925208b76ac8`.
+It was configured with `darwin64-x86_64-cc no-shared no-tests`, built with
+`make -j4`, and installed with `make install_sw install_ssldirs` exclusively under
+`/tmp/certnify-r3-openssl.sSpJ2u/install`. No system OpenSSL was replaced.
+The OpenSSL project's own test suite was not executed; these are Certnify tests.
+
+The first 1.1.1w run used the build-tree executable before installation of its
+default `openssl.cnf`. Three methods failed during SAN request inspection because
+that configuration was missing. The prefix was then completed and all six common
+methods rerun using its installed executable. These exploratory failures are
+environment preparation failures, not evidence of a Certnify parsing defect.
+The CRL boundary refinement was separately rerun on both accepted backends.
+
+Final observed outcomes (targeted methods, not full suites):
+
+| Actual backend | Behavioral checks | Admission evidence |
+| --- | --- | --- |
+| OpenSSL 1.1.1w, complete temporary installation | 6/6 common methods passed | Bootstrap accepted; 3.x preserving migration not applicable |
+| OpenSSL 3.5.9, existing installation | 7/7 methods passed | Bootstrap accepted |
+| OpenSSL 4.1.0, existing installation | Not applicable | Make and direct root generation rejected; fixture unchanged |
+| LibreSSL 3.3.6, system executable | Not applicable | Make and direct root generation rejected; fixture unchanged |
+
+Commands executed from the repository root:
+
+```sh
+python3 -B test/openssl-matrix.py \
+  --backend /usr/local/opt/openssl@3/bin/openssl \
+  --backend /usr/local/opt/openssl@3.2/bin/openssl \
+  --backend /tmp/certnify-r3-openssl.sSpJ2u/openssl-1.1.1w/apps/openssl \
+  --reject-backend /usr/local/bin/openssl --reject-backend /usr/bin/openssl \
+  --jobs 2 > /tmp/certnify-r3-matrix.jsonl
+# After completing the temporary 1.1.1w installation:
+python3 -B test/openssl-matrix.py \
+  --backend /tmp/certnify-r3-openssl.sSpJ2u/install/bin/openssl \
+  > /tmp/certnify-r3-111-complete.jsonl
+```
+
+The first command returned 1 for the three preparation failures above; its 3.5.9
+methods and four rejection probes passed. The second command returned 0. The final
+CRL boundary method was then rerun directly on both backends (both passed).
+These temporary paths record this run; substitute complete installations when
+reproducing it elsewhere. Binary hashes and resolved identities remain in JSONL.
+There are 13 successful final backend/method combinations, covering seven distinct
+methods; targeted reruns and intentional negative CLI probes are not extra methods.
+
+`OPENSSL=/usr/local/opt/openssl@3/bin/openssl make test-stage0` passed 5/5 methods,
+including source packaging of both new test tools. Python 3.8 grammar, local
+documentation link targets and `git diff --check` passed. No full-suite or smoke
+rerun is claimed for this matrix-tooling change. No runtime parser changes were
+needed for the completed backend installations.
+
+This targeted matrix extends evidence across the two accepted backend families.
+It does not replace the historical full qualification, prove compatibility of
+every 1.1.1 patch or 3.x release, or qualify Linux, Python 3.8, other architectures,
+storage power loss or remote publishers. Preserving migration remains 3.x-only.
+The existing accepted-version filter and runtime parsers are unchanged.
 
 ## Acceptance scenarios
 

@@ -46,6 +46,61 @@ no operation still owns it before manual removal. There is no distributed-lock
 or hostile external-writer guarantee. Publication hooks execute while locked;
 they must not recursively invoke toolkit transactions.
 
+## Shell bootstrap and ownership contract
+
+`bin/pki-env.sh` is the sole bootstrap entry point. Its first load establishes
+the physical `ROOT_DIR`, initial `PKI_CALL_DIR`, private umask, backend admission
+and helper definitions. Its helper load order is state, CRL, policy, recovery,
+durability, resume, hold, validity, then input helpers and public-input validation.
+The ordered loader explicitly refuses missing/unreadable helper files before
+sourcing them: Bash 3.2 may otherwise expose a zero status to an EXIT trap for a
+failed source. Helpers declare functions and initialize internal state only.
+Function bodies
+may refer to later helpers, but no transaction may begin before the entire
+bootstrap and validation succeed. Helpers must not be sourced individually.
+
+A final readonly, nonexported `__CERTNIFY_ENV_READY=1` declaration marks completed
+initialization. Re-sourcing in the owning shell returns without resetting state,
+defaults or traps. An ordinary environment value does not carry the readonly
+attribute, and a preexisting `pki_begin` function is not evidence of completed
+bootstrap. A new Bash process initializes its own ownership even if internal
+variable values or functions were exported by its caller. The marker is an
+internal maintenance guard, not protection against code executing in the shell.
+
+| State | Owner and meaning |
+| --- | --- |
+| `ROOT_DIR`, `PKI_CALL_DIR` | Bootstrap: physical workspace and original call directory; do not rebind during a transaction |
+| `__CERTNIFY_LOCK_DIRS` | Lock helpers: locks actually acquired by this shell; never reconstructed from environment values |
+| `PKI_RECOVERY_OWNED`, `PKI_OPERATION_COMPLETE` | Recovery helpers: owned pending journal and permission to retire it on a successful exit |
+| `PKI_DURABLE_OWNED` | Durability helpers: current fence identity, cleared only after successful finish |
+| `PKI_DURABLE_KEEP`, `PKI_DURABLE_COMPLETED` | Durability/exit helpers: retain interrupted fence; acknowledge completed local persistence |
+
+| Function | Inputs, effects and caller obligations |
+| --- | --- |
+| `pki_begin [read\|write]` | Fully initialized context; default write. Changes cwd to `ROOT_DIR`, acquires/reuses the workspace lock, checks recovery and fence admission, and opens/reuses a write fence when requested. Reinstalls EXIT/INT/TERM traps even on re-entry. Install command-specific cleanup afterward. |
+| `recovery_start operation...` | Admitted transaction; creates one owned journal or appends a nested-operation note without replacing the outer identity. `recovery_complete` marks completion; it does not release anything. |
+| `durability_begin`, `durability_finish` | Called under the owned lock. Begin reuses this shell's fence; finish persists state and clears ownership unless KEEP requires retention. Failures propagate; never infer success from a cleared shell-local copy in a subshell. |
+| `release_locks` | Finishes durability before releasing owned locks. A barrier failure prevents lock release. Callers must propagate failure. |
+| `pki_exit status` | Terminal handler. Preserves uncertain journals and signal fences, releases locks when possible, removes its EXIT trap and exits. Custom cleanup must save the original status before cleanup and invoke this handler once. |
+
+Ownership-changing calls must run in the owning shell, not a pipeline or command
+substitution. Subshells are suitable for isolated staging/inspection only; they
+cannot transfer their variable changes to the parent. Batch child commands are
+separate transactions entered after the parent's lock is released.
+
+Rollover's source of `gen-intm.sh` is a **terminal same-shell handoff**, not a
+function returning a result. It supplies `INT_DIR`, validated `CN`, normalized key
+parameters and lifetime inputs. The generator retains the outer lock, fence and
+journal identity, installs its own temporary-file EXIT cleanup and eventually
+calls `pki_exit`. Its idempotent branch may exit the shell directly. Do not append
+rollover work after this handoff or rely on generator scratch globals remaining
+unchanged. A reusable returning API would require a separate explicit contract.
+
+Stage2 covers bootstrap collisions, inherited state, re-entry, cleanup traps and
+ordinary/signal failures. Stage6 exercises the real rollover handoff on success
+and signing failure, plus existing move failures and recovery refusal. These
+contracts reduce maintenance coupling; they do not eliminate Bash global state.
+
 ## Opening established authorities
 
 Layout initialization is limited to absent or empty authority directories.
@@ -170,6 +225,15 @@ Recovery copies, custom/nested authorities, generations, exports and other
 nonexcluded workspace entries remain fully covered. The scan cost grows
 with retained PKI history; this implementation favors a complete persistence
 boundary over per-file write tracking. No files outside the workspace are covered.
+
+Measure history-dependent cost with the opt-in disposable
+[batch benchmark](../test/README.md#retained-history-performance-measurement).
+It varies retained regular-file count independently of real preserving batch size
+and records complete scans, synchronization calls and elapsed time with actual
+barriers enabled. This is a performance diagnostic, not a durability bypass or a
+throughput guarantee. A change to synchronization scope requires a separate
+write-coverage design and failure/recovery validation; elapsed-time measurements
+alone do not justify excluding completed journals or historical authorities.
 
 Before installing a verified plan, the toolkit persists backend state, source
 copies, guards, manifest and `ready`, then binds the ready-file digest into the

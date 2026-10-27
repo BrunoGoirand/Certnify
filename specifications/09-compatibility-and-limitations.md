@@ -56,11 +56,17 @@ in chapter 01.
 
 ## Qualification and security boundaries
 
-The tested platform is macOS with Bash 3.2.57, GNU Make 3.81, OpenSSL 3.6.4 and
-Python 3.14.7 for tests. The executable gate accepts OpenSSL 1.1.1/3.x and rejects
-LibreSSL; that acceptance is not testing or a vendor-support claim. Other backend
-versions, Linux/newer Bash, actual remote publishers and network filesystems need
-their own qualification. Test commands and acceptance coverage are in chapter 10.
+Historical full qualification used macOS with Bash 3.2.57, GNU Make 3.81,
+OpenSSL 3.6.4 and Python 3.14.7. The executable gate accepts OpenSSL 1.1.1/3.x
+and rejects LibreSSL and OpenSSL 4.x; acceptance is not testing or a vendor-support
+claim. The opt-in [backend matrix](../test/README.md#openssl-backend-matrix) exercises
+real executable identities against the ASN.1, key metadata, CRL, date and strict
+verification contracts, with preserving migration tested separately on 3.x.
+Aliases of one installed executable do not qualify additional versions.
+Current targeted results and untested combinations are recorded in
+[chapter 10](10-acceptance-and-traceability.md#openssl-backend-matrix-2026-10-27).
+Other backend versions, Linux/newer Bash, actual remote publishers and network
+filesystems still need their own qualification.
 
 Keys are unencrypted files under restrictive permissions. Use the documented data
 locations or add explicit exclusions for custom locations before generation. Git

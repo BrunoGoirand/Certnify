@@ -193,5 +193,106 @@ class State(unittest.TestCase):
         self.assertTrue(lock.exists())  # Never steal allegedly abandoned locks.
 
 
+class ShellContext(unittest.TestCase):
+    """Bootstrap and same-shell ownership contracts without operational PKIs."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='certnify-shell-context-')
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        self.work = self.base / 'work'
+        copy_sources(SOURCE, self.work)
+        self.env = {key: os.environ[key] for key in ('PATH', 'TMPDIR', 'OPENSSL') if key in os.environ}
+        self.env['LC_ALL'] = 'C'
+
+    def shell(self, body, work=None, **env):
+        return subprocess.run(['/bin/bash', '-c', body], cwd=work or self.work,
+                              env=dict(self.env, **env), capture_output=True,
+                              text=True, timeout=30)
+
+    def test_bootstrap_does_not_trust_function_presence_or_inherited_state(self):
+        before = snapshot(self.work)
+        result = self.shell('''
+pki_begin() { exit 91; }
+export -f pki_begin
+source bin/pki-env.sh
+declare -F pki_exit durability_begin recovery_guard validate_public_inputs >/dev/null
+[[ -z "$PKI_RECOVERY_OWNED$PKI_DURABLE_OWNED" ]]
+[[ "$PKI_OPERATION_COMPLETE:$PKI_DURABLE_KEEP:$PKI_DURABLE_COMPLETED" == 0:0:0 ]]
+[[ ${#__CERTNIFY_LOCK_DIRS[@]} == 0 ]]
+[[ "$ROOT_DIR" == "$PWD" ]]
+# A child must bootstrap even if a caller exports the marker and ownership.
+env __CERTNIFY_ENV_READY=1 PKI_DURABLE_OWNED=forged PKI_RECOVERY_OWNED=1 \
+  /bin/bash -c 'source bin/pki-env.sh; declare -F pki_exit >/dev/null; [[ -z "$PKI_DURABLE_OWNED$PKI_RECOVERY_OWNED" ]]'
+''', __CERTNIFY_ENV_READY='1', PKI_RECOVERY_OWNED='1',
+            PKI_OPERATION_COMPLETE='1', PKI_DURABLE_OWNED='forged',
+            PKI_DURABLE_KEEP='1', PKI_DURABLE_COMPLETED='1', ROOT_DIR='/invalid')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(before, snapshot(self.work))
+
+        partial = self.base / 'partial'
+        copy_sources(SOURCE, partial)
+        (partial / 'bin/pki-durable.sh').unlink()
+        result = self.shell('''
+trap 'rc=$?; if declare -p __CERTNIFY_ENV_READY >/dev/null 2>&1; then exit 99; fi; exit "$rc"' EXIT
+source bin/pki-env.sh
+''', work=partial)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('pki-durable.sh', result.stderr)
+
+    def test_resourcing_preserves_owned_context_and_cleanup_traps(self):
+        result = self.shell('''
+source bin/pki-env.sh
+pki_begin
+recovery_start shell-context
+context_before="$(declare -p ROOT_DIR PKI_CALL_DIR __CERTNIFY_LOCK_DIRS PKI_RECOVERY_OWNED PKI_OPERATION_COMPLETE PKI_DURABLE_OWNED PKI_DURABLE_KEEP PKI_DURABLE_COMPLETED)"
+trap 'rc=$?; printf cleaned > "$ROOT_DIR/../cleanup"; pki_exit "$rc"' EXIT
+traps_before="$(trap -p EXIT INT TERM)"
+fence_before="$(cat .recovery/power-loss)"
+journal_before="$(cat .recovery/pending/operation)"
+source bin/pki-env.sh
+source bin/pki-env.sh
+[[ "$context_before" == "$(declare -p ROOT_DIR PKI_CALL_DIR __CERTNIFY_LOCK_DIRS PKI_RECOVERY_OWNED PKI_OPERATION_COMPLETE PKI_DURABLE_OWNED PKI_DURABLE_KEEP PKI_DURABLE_COMPLETED)" ]]
+[[ "$traps_before" == "$(trap -p EXIT INT TERM)" ]]
+# Re-entry reinstalls standard traps but must not create another lock/fence.
+pki_begin
+[[ "$(cat .locks/root-ca.lock/pid)" == "$$" ]]
+[[ ${#__CERTNIFY_LOCK_DIRS[@]} == 1 ]]
+[[ "$fence_before" == "$(cat .recovery/power-loss)" ]]
+recovery_start nested
+[[ "$journal_before" == "$(cat .recovery/pending/operation)" ]]
+trap 'rc=$?; printf cleaned > "$ROOT_DIR/../cleanup"; pki_exit "$rc"' EXIT
+recovery_complete
+''')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.base / 'cleanup').read_text(), 'cleaned')
+        self.assertIn('Local state durably synchronized', result.stderr)
+        for path in ('.locks/root-ca.lock', '.recovery/pending', '.recovery/power-loss'):
+            self.assertFalse((self.work / path).exists(), path)
+
+    def test_resourcing_preserves_failure_and_signal_fences(self):
+        for ending, expected, fenced in [('exit 7', 7, False),
+                                         ('kill -TERM $$', 143, True),
+                                         ('kill -INT $$', 130, True)]:
+            with self.subTest(ending=ending):
+                work = self.base / str(expected)
+                copy_sources(SOURCE, work)
+                result = self.shell('source bin/pki-env.sh; pki_begin; '
+                                    'recovery_start interrupted; source bin/pki-env.sh; ' + ending,
+                                    work=work)
+                self.assertEqual(result.returncode, expected)
+                self.assertTrue((work / '.recovery/pending').exists())
+                self.assertEqual((work / '.recovery/power-loss').exists(), fenced)
+                self.assertFalse((work / '.locks/root-ca.lock').exists())
+                self.assertNotIn('Local state durably synchronized', result.stderr)
+                before = snapshot(work)
+                refused = self.shell('source bin/pki-env.sh; pki_begin', work=work,
+                                     PKI_RECOVERY_OWNED='1', PKI_DURABLE_OWNED='forged',
+                                     __CERTNIFY_ENV_READY='1')
+                self.assertNotEqual(refused.returncode, 0)
+                self.assertIn('Unresolved operation', refused.stderr)
+                self.assertEqual(before, snapshot(work))
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

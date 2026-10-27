@@ -47,6 +47,10 @@ uses Python 3.14.7. The durability helper supports macOS and Linux, fails closed
 on unsupported barriers, and requires a single local filesystem. External writers,
 including synchronization agents modifying live PKI files, are prohibited.
 
+Additional versions can be checked with the opt-in
+[OpenSSL backend matrix](test/README.md#openssl-backend-matrix).
+Its targeted compatibility results are distinct from full platform qualification.
+
 ## Quick start
 
 Use a fresh workspace for this example. It creates a root and Web intermediate,
@@ -417,6 +421,11 @@ Tests create disposable workspaces from an explicit source manifest and use gene
 fixture keys. The suites cover parsing, policies, concurrency, revocation and injected
 failures; publication uses local stubs. See [test/README.md](test/README.md) for execution
 and [acceptance coverage](specifications/10-acceptance-and-traceability.md) for limits.
+
+For large retained histories, use the optional
+[durability batch benchmark](test/README.md#retained-history-performance-measurement)
+in disposable fixtures to measure synchronization cost before sizing batches.
+Mutating operations still synchronize all nonexcluded workspace state.
 
 `make clean` now previews only, without a workspace mutation. After checking the
 listed paths and taking any required backup, `make clean CLEAN_APPLY=1` deletes

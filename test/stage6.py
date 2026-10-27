@@ -158,6 +158,51 @@ class Recovery(unittest.TestCase):
         self.assertTrue(list(self.work.glob('intm-web-ca-pre-rollback-*')))
         self.make('server', 'CN=blocked.example', success=False)
 
+    def test_rollover_handoff_keeps_one_owner_and_generator_cleanup(self):
+        rollover = self.work / 'bin/intm-rollover.sh'
+        rollover.write_text(rollover.read_text().replace(
+            'source "$ROOT_DIR/bin/gen-intm.sh"', '''
+R2_FENCE="$PKI_DURABLE_OWNED"
+R2_JOURNAL="$(cat .recovery/pending/operation)"
+R2_LOCK="$(cat .locks/root-ca.lock/pid)"
+source "$ROOT_DIR/bin/gen-intm.sh"
+'''))
+        generator = self.work / 'bin/gen-intm.sh'
+        generator.write_text(generator.read_text().replace('pki_begin\n', '''pki_begin
+[[ "$R2_FENCE" == "$PKI_DURABLE_OWNED" ]]
+[[ "$PKI_RECOVERY_OWNED:$PKI_OPERATION_COMPLETE:$PKI_DURABLE_KEEP" == 1:0:0 ]]
+[[ "$R2_JOURNAL" == "$(cat .recovery/pending/operation)" ]]
+[[ "$R2_LOCK" == "$$" && "$R2_LOCK" == "$(cat .locks/root-ca.lock/pid)" ]]
+[[ ${#__CERTNIFY_LOCK_DIRS[@]} == 1 ]]
+''').replace('cleanup() {', '''cleanup() {
+  printf cleaned > "$ROOT_DIR/../generator-cleanup"
+'''))
+        old_cert = (self.ca / 'certs/ca.cert.pem').read_bytes()
+        self.make('rollover-web', 'INT_CN=Handoff Replacement')
+        self.assertEqual((self.work.parent / 'generator-cleanup').read_text(), 'cleaned')
+        legacy = next(self.work.glob('intm-web-ca-legacy-*'))
+        self.assertEqual((legacy / 'certs/ca.cert.pem').read_bytes(), old_cert)
+        self.assertNotEqual((self.ca / 'certs/ca.cert.pem').read_bytes(), old_cert)
+        subject = self.run_cmd([self.backend, 'x509', '-in', str(self.ca / 'certs/ca.cert.pem'),
+                                '-noout', '-subject']).stdout
+        self.assertIn('Handoff Replacement', subject)
+        for path in ('.locks/root-ca.lock', '.recovery/pending', '.recovery/power-loss'):
+            self.assertFalse((self.work / path).exists(), path)
+
+        # The generator's EXIT trap must still retire the lock/fence and retain
+        # the outer rollover journal when the nested signing operation fails.
+        (self.work.parent / 'generator-cleanup').unlink()
+        backend = self.wrapper('if [[ "$1" == ca && " $* " == *" -in "* ]]; then exit 74; fi')
+        self.make('rollover-web', 'INT_CN=Failed Handoff', success=False, OPENSSL=backend)
+        self.assertEqual((self.work.parent / 'generator-cleanup').read_text(), 'cleaned')
+        self.assertIn('operation=intm-rollover', (self.work / '.recovery/pending/operation').read_text())
+        self.assertFalse((self.work / '.locks/root-ca.lock').exists())
+        self.assertFalse((self.work / '.recovery/power-loss').exists())
+        before = snapshot(self.work)
+        result = self.make('rollover-web', 'INT_CN=Blocked Retry', success=False)
+        self.assertIn('Unresolved operation', result.stderr)
+        self.assertEqual(before, snapshot(self.work))
+
     def test_killed_issuer_keeps_pending_journal_and_stale_lock(self):
         body = 'if [[ "$1" == ca && " $* " == *" -in "* ]]; then\n' + shlex.quote(self.backend) + ' "$@" || exit\nkill -KILL "$PPID"\nexit 75\nfi'
         result = self.make('server', 'CN=killed.example', success=False, OPENSSL=self.wrapper(body))

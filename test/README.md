@@ -59,6 +59,58 @@ version. Newer Bash, other platforms/backends, network filesystems, power loss a
 actual remote publication remain unqualified. See the
 [acceptance map](../specifications/10-acceptance-and-traceability.md).
 
+## OpenSSL backend matrix
+
+The opt-in matrix tests actual executables, not directory labels or mocked version
+strings. Supply paths explicitly; it neither downloads nor installs a backend:
+
+```sh
+python3 -B test/openssl-matrix.py \
+  --backend /absolute/path/to/openssl-1.1.1 \
+  --backend /absolute/path/to/openssl-3 \
+  --reject-backend /absolute/path/to/libressl \
+  --reject-backend /absolute/path/to/openssl-4 \
+  --jobs 2 > /tmp/certnify-openssl-matrix.jsonl
+```
+
+Repeat either backend option as needed; one executable is also valid. Missing
+executables fail the command. Aliases resolving to the same executable are reported
+once and never counted as distinct tested versions; conflicting accept/reject
+expectations for the same executable fail before tests. The JSONL report records
+platform/Python, resolved executable paths, real version strings, binary SHA-256,
+admission outcomes and per-method results. Rejected backends must fail both Make
+and direct root generation without changing fixture state. Accepted backends must
+bootstrap without mutation before the behavioral checks begin.
+
+The common selection is six methods:
+
+| Method | Backend-dependent contract |
+| --- | --- |
+| `backend-contract.py Backend.test_crl_signature_issuer_and_time_boundaries` | Real CRL issuer/signature/date parsing; reject corrupted signatures, wrong issuers, past/future reference times, malformed and missing CRLs without mutation |
+| `stage4.py Revocation.test_strict_coverage` | Required root/issuer CRLs and revoked-chain outcomes |
+| `stage4.py Revocation.test_backend_status_overrides_misleading_output` | Backend failure cannot be converted to verification success by text matching |
+| `stage5.py Policy.test_effective_key_metadata_matrix` | RSA, EC curves, Ed25519/Ed448 metadata and reused-key policy |
+| `stage8.py Operations.test_application_identity_purpose_and_strict_crls` | DNS/IP/purpose checks and strict full-chain CRL verification |
+| `stage12.py IssuanceCategories.test_compiled_custom_profiles_missing_multiple_and_oid_alias_ekus` | ASN.1 extension decoding, compiled profiles, missing/multiple EKUs and OID aliases |
+
+OpenSSL 3.x additionally runs
+`stage9.py Migration.test_complete_subject_sans_curve_fresh_key_dry_run_and_retry`.
+Preserving migration is explicitly not applicable on 1.1.1; that entry is not
+counted as a passed test. The portable CRL case corrupts DER signature bytes and
+supplies reference times to the shared validator, avoiding newer test-only CRL
+generation flags that could confuse harness compatibility with product behavior.
+
+Every method uses manifest-only disposable fixtures and a stripped environment.
+Workers may run different backends concurrently; methods for a given backend run
+serially. Each method has a private temporary tree and a ten-minute timeout;
+on timeout its process group is terminated before fixture cleanup. The command
+returns nonzero if admission or any selected method fails. JSONL never exports
+captured test output, private keys or recovery journals. For diagnostics, rerun
+the named failed method with its explicit `OPENSSL` path using the ordinary test
+command. This matrix is a targeted compatibility gate, not the full regression
+suite, a throughput benchmark or qualification of every accepted version/platform.
+See [recorded results and gaps](../specifications/10-acceptance-and-traceability.md#openssl-backend-matrix-2026-10-27).
+
 ## Generated-data convention
 
 Keep authority data in workspace `/root/`, `/intm-*/` (including custom kinds, legacy and rollback names), `/intermediate/`, or `/pki-data/` for explicitly selected custom paths. `/out/`, `/.locks/`, `/.recovery/`, and `/test-results/` are excluded too. Private directories and conventional `.key.pem`/backup filenames are ignored as defense in depth.
@@ -71,6 +123,10 @@ Suite 1 covers parser and selection regressions; see [the record contract](../sp
 
 Suite 2 covers path, transaction-lock, and generation-transition regressions; see
 [the authority state contract](../specifications/08-architecture-and-reliability.md).
+Its `ShellContext` cases also check completed-bootstrap detection and refusal of
+missing helpers. They cover resetting inherited ownership, idempotent sourcing
+with active lock/fence/journal state, preserved cleanup traps, and
+ordinary/SIGINT/SIGTERM failure admission.
 
 Suite 3 executes Make adapters, partial batches, receipt concurrency/retry safety,
 and FILE/CHAIN compatibility; see [the batch contract](../specifications/07-lifecycle-and-migration.md).
@@ -86,6 +142,9 @@ staging; see [the policy contract](../specifications/04-cryptography-and-profile
 
 Suite 6 injects issuance, installation, move and publication failures, including
 a killed issuer. See [the recovery contract](../specifications/08-architecture-and-reliability.md).
+The rollover handoff test asserts a single shell/lock/fence/journal owner across
+the sourced generator, its cleanup trap on success and signing failure, preserved
+history and blocked blind retry. Probe assertions exist only in copied fixtures.
 Publication uses only disposable local copy stubs. Recovery acknowledgment in these
 tests records fixture-specific manual inspection; it is not an automatic repair.
 
@@ -159,6 +218,51 @@ Smoke also passed before the last admission/review refinements; those refinement
 were checked with targeted tests. See the
 [durability evidence](../specifications/10-acceptance-and-traceability.md#durability-validation-2026-09-21)
 for the precise incremental-validation and hardware/platform limits.
+
+## Retained-history performance measurement
+
+Run the opt-in benchmark from the repository root, selecting an accepted OpenSSL
+3.x executable (preserving migration requires 3.x):
+
+```sh
+OPENSSL=/absolute/path/to/openssl python3 -B test/benchmark-durability.py \
+  --rows 1 3 --history-files 0 100 1000 --record-bytes 4096 --repeat 3 \
+  > /tmp/certnify-durability.jsonl
+```
+
+Each sample creates a fresh manifest-only temporary workspace, generates EC root,
+intermediate and leaf keys, rolls over the intermediate, exports its inventory and
+times a real preserving reissuance batch. Setup and final chain verification are
+outside the timed interval. The batch must issue every row, retain completed
+receipts and leave no pending journal or power-loss fence. No live PKI is read or
+copied. Temporary fixtures are removed on normal exit, including command failure.
+The subprocess environment is stripped as for the regression suites.
+
+Additional synthetic history consists of regular files under
+`pki-data/benchmark-history/`, grouped by 100, with the configured size per file.
+It models the persistence footprint, not a population of valid authorities; the
+real source generation and completed journals remain present too. Setup receives
+a real persistence flush before measurement. Results therefore describe warm
+filesystem caches, not cold starts. Repetitions alternate history-size order.
+
+The probe wraps `sync_tree` and `sync_path` **only in the copied helper**; every
+original barrier still executes. It writes counts/timings to a sibling temporary
+log outside the scanned workspace. JSONL exports environment metadata, helper
+source hashes and one aggregate record per sample, without fixture paths, keys,
+journals or backend output.
+`actions` counts helper invocations by action; `trees` counts complete scans;
+`history_syncs` must equal `history_files * trees`. `tree_seconds` includes its
+file/directory synchronization calls; `sync_seconds` includes all `sync_path`
+calls, including device barriers outside tree walks. These times overlap and
+must not be added. `full_calls` counts requested full barriers. All timings
+include probe overhead; `batch_seconds` also includes shell, OpenSSL and Python
+startup. Compare medians/ranges across repetitions, never use timing thresholds
+as a correctness gate. Increase history and row counts to match the intended
+deployment; storage, file sizes and cryptographic profiles affect results.
+
+This benchmark is separate from numbered regression gates and does not qualify
+power loss, network storage or production throughput. See the recorded
+[measurement and decision](../specifications/10-acceptance-and-traceability.md#retained-history-measurement-2026-10-27).
 
 ## Authority issuance categories
 

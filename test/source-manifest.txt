@@ -102,3 +102,6 @@ test/stage9.py
 test/stage10.py
 test/stage11.py
 test/stage14.py
+test/benchmark-durability.py
+test/backend-contract.py
+test/openssl-matrix.py
