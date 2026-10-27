@@ -404,7 +404,9 @@ commit boundaries, stale locks and manual recovery.
 make help
 make tree
 make ls-web
-make test-stage0 test-stage1 test-stage2 test-stage3 test-stage4 test-stage5 test-stage6 test-stage7 test-stage8 test-stage9 test-stage10
+make test-stage0 test-stage1 test-stage2 test-stage3 test-stage4 \
+  test-stage5 test-stage6 test-stage7 test-stage8 test-stage9 \
+  test-stage10 test-stage11 test-stage12 test-stage13 test-stage14
 make test-smoke
 ```
 

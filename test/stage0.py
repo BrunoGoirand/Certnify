@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Regression gate for source packaging and disposable test workspaces."""
+import ast
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -20,6 +22,29 @@ class StageZero(unittest.TestCase):
 
     def git(self, *args):
         return subprocess.run(['git', '-C', str(self.seed), *args], capture_output=True, text=True)
+
+    def test_current_acceptance_map_matches_executable_gates(self):
+        suites = {}
+        for name in source_paths(self.seed):
+            match = re.fullmatch(r'test/stage(\d+)\.py', name)
+            if match:
+                tree = ast.parse((self.seed / name).read_text())
+                suites[int(match[1])] = sum(
+                    isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and node.name.startswith('test_') for node in ast.walk(tree))
+        makefile = (self.seed / 'Makefile').read_text()
+        targets = {int(n) for n in re.findall(r'^test-stage(\d+):', makefile, re.M)}
+        self.assertEqual(set(suites), targets)
+        acceptance = (self.seed / 'specifications/10-acceptance-and-traceability.md').read_text()
+        current = acceptance.split('## Executable gates\n', 1)[1].split('\n## ', 1)[0]
+        rows = re.findall(r'^\| make test-stage(\d+) \| (\d+) \|', current, re.M)
+        self.assertEqual(len(rows), len(suites))
+        self.assertEqual({int(stage): int(count) for stage, count in rows}, suites)
+        for name in ['README.md', 'README-fr.md', 'test/README.md']:
+            blocks = re.findall(r'```sh\n(.*?)```', (self.seed / name).read_text(), re.S)
+            commands = next(block for block in blocks if 'make test-stage0' in block)
+            documented = {int(n) for n in re.findall(r'\btest-stage(\d+)\b', commands)}
+            self.assertEqual(documented, targets, name)
 
     def test_source_only_and_root_generation(self):
         # Unlisted data must never be copied, even if placed inside source folders.

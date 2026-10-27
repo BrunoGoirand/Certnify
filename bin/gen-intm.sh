@@ -45,7 +45,8 @@
 # KEY_EDDSA             EdDSA type: Ed25519 | Ed448 (default: Ed25519)
 #
 # === Directories & Layout ===
-# ROOT_DIR              Root CA directory (default: ./root)
+# ROOT_DIR              Internal physical workspace root, derived by pki-env.sh;
+#                       not a caller override. The root CA lives under root/.
 # INT_DIR               Intermediate CA directory (has priority over KIND)
 # KIND                  Shortcut for intermediate type ("web", "auth", "code", "smime", "archive")
 #                       Expands automatically to "intm-${KIND}-ca" if INT_DIR is unset.
@@ -73,9 +74,6 @@
 # === Post-Generation Behavior ===
 # CRL_UPDATE            1 = automatically rebuild CRLs after issuance or revocation
 # CRL_DAYS              CRL validity in days when CRL_UPDATE=1 (default: 7)
-#
-# === File Naming ===
-# FORCE_NEW_KEY         Alias of ROTATE_KEY (for backward compatibility)
 #
 # === Miscellaneous ===
 # OPENSSL               Path to OpenSSL binary (default: openssl)

@@ -21,12 +21,12 @@ process termination and mocked barriers do not satisfy that qualification.
 
 | Command | Scenarios | Primary coverage |
 | --- | ---: | --- |
-| make test-stage0 | 4 | Source manifest, exclusions, root bootstrap, snapshots |
-| make test-stage1 | 9 | Strict record parsing, serial arithmetic, CN selection, inventories |
-| make test-stage2 | 6 | Canonical paths, generations, concurrency, rollover/rollback |
+| make test-stage0 | 5 | Source manifest, exclusions, root bootstrap, snapshots, current test-map consistency |
+| make test-stage1 | 10 | Strict record parsing, serial arithmetic, CN selection, inventories |
+| make test-stage2 | 9 | Canonical paths, generations, concurrency, rollover/rollback |
 | make test-stage3 | 8 | Actual command adapters, batch outcomes/receipts, FILE/CHAIN |
 | make test-stage4 | 11 | Trust/CRL errors, idempotent revocation, read-only plans, failed refresh, root CRL display errors and empty/revoked lists |
-| make test-stage5 | 8 | Effective key/profile matrix, SANs, names, configuration completeness |
+| make test-stage5 | 10 | Effective key/profile matrix, SANs, names, configuration completeness |
 | make test-stage6 | 15 | Interrupted commits, killed issuer, preserved replacements, publication resume |
 | make test-stage7 | 13 | Audit A01–A06, state loss, Make transport, key strength, SAN equality and UTF-8 |
 | make test-stage8 | 14 | Controlled cleanup, chain lifetime admission, DNS/IP/email/URI/subject and reference-time verification, CN-only batch and historical CRLs |
@@ -34,7 +34,14 @@ process termination and mocked barriers do not satisfy that qualification.
 | make test-stage10 | 11 | Hold release, verified installation recovery and workspace relocation |
 | make test-stage11 | 15 | Persistence ordering/errors, excluded-path admission, durable checkpoints, backend kill, safe resumption and CRL read/write admission |
 | make test-stage12 | 8 | Authority categories, compiled EKUs, custom profiles/paths, immutable category, batch admission, post-signing fencing and explicit generic command |
+| make test-stage13 | 7 | Administrator hook opt-in, persistence scope, publication deadlines/cancellation and remote read-back validation |
+| make test-stage14 | 9 | Leaf inventories, status selection, stdout/file output, authority selectors and legacy resolution |
 | make test-smoke | Integration workflow | Kinds, profiles, SANs, issuance, revocation, rekey, CLI examples and intermediate verification status before/after revocation |
+
+The numeric counts above inventory current `test_*` methods, not execution
+results or subtest counts. Stage 0 checks them against the source manifest,
+Make targets and documented launch commands. Historical results below retain
+their original scope and counts.
 
 The stage-numbered command names are stable test-suite identifiers, not an active
 implementation plan. The historical complete behavioral qualification on 2026-09-19
@@ -147,7 +154,7 @@ The A01–A06 correction suite adds semantic and failure-boundary checks to the
 original 55 scenarios. In particular, preflight refusals compare authority
 snapshots, while a post-sign SAN mismatch must retain the issued history and
 pending journal without installing the named certificate. Tests use no live PKI.
-Current execution results are recorded in AUDIT.md after validation.
+Dated execution results and qualification limits are recorded in this chapter.
 
 The routine-operation suite additionally checks cleanup preview/application,
 issuer-chain lifetime admission before mutation, explicit application identity

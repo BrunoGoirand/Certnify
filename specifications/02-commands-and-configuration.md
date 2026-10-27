@@ -32,7 +32,7 @@ Run Make from the project root. The default target is `help`. Variables are stri
 | `reissue-leafs-<kind>` | `intm-reissue-leafs.sh`: consume inventory |
 | `ls-web`, `ls-auth`, `ls-code`, `ls-smime`, `ls-archive` | List certificate directory; listing failure is ignored |
 | `tree` | Display directories to depth three |
-| `test-smoke`, `test-stage0` … `test-stage8` | Run disposable integration/regression fixtures |
+| `test-smoke`, `test-stage0` … `test-stage14` | Run disposable integration/regression fixtures |
 | `clean` | Preview controlled root/intm-*/out cleanup; CLEAN_APPLY=1 explicitly applies |
 
 `bin/intm-publish-final-crl.sh` and `bin/recovery.sh` are direct script operations without Make targets. `bin/gen-leaf.sh` also permits direct use. See [the guides](guides/README.md) for examples.

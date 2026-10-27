@@ -15,6 +15,9 @@ make test-stage8
 make test-stage9
 make test-stage10
 make test-stage11
+make test-stage12
+make test-stage13
+make test-stage14
 make test-smoke
 ```
 
@@ -45,6 +48,10 @@ python3 test/workspace.py diff /tmp/before.json /tmp/after.json
 Smoke command snapshots are transient and a failed command prints changed paths before session cleanup. Future regression tests should assert the expected state changes, rather than merely recording them.
 
 ## Validated environment and limits
+
+Stage 0 checks current acceptance-table method counts, Make suite targets and
+the launch blocks in both project READMEs and this guide. This is a static
+consistency check, not execution of the listed suites or a new qualification.
 
 The qualified platform is macOS, Bash 3.2.57, GNU Make 3.81, OpenSSL 3.6.4 and
 Python 3.14.7. The OpenSSL 1.1.1/3.x executable gate does not qualify every accepted
@@ -177,3 +184,10 @@ publication configuration admission, false upload success, blocked upload/read,
 oversized or wrong read-back, reader failure and verified idempotent retry.
 Only disposable keys and a local directory adapter are used; remote services,
 hardware power loss and Linux are not qualified by these tests.
+
+## Leaf inventory exports
+
+`make test-stage14` covers empty and populated inventories, revoked-entry
+selection, stdout and file output, explicit authority selection, legacy issuer
+resolution after rollover and replacement of an existing output file. It uses
+disposable PKIs and generated keys.
