@@ -301,6 +301,8 @@ Aucune URL de CRL n’est téléchargée ou ajoutée automatiquement
 aux extensions. `verify-intermediate-revoked` échoue pour un intermédiaire révoqué ;
 il n’inverse pas le succès de vérification. Les commandes `show-intermediate-serial`
 et `crl-root-revoked` permettent l’inspection avec un sélecteur d’autorité explicite.
+`crl-root-revoked` échoue si la CRL racine est absente ou malformée ; une CRL valide
+sans entrée révoquée réussit. Son affichage est informatif, pas une API d’appartenance.
 
 ## Cycle de vie, lots et publication
 

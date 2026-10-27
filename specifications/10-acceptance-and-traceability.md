@@ -25,7 +25,7 @@ process termination and mocked barriers do not satisfy that qualification.
 | make test-stage1 | 9 | Strict record parsing, serial arithmetic, CN selection, inventories |
 | make test-stage2 | 6 | Canonical paths, generations, concurrency, rollover/rollback |
 | make test-stage3 | 8 | Actual command adapters, batch outcomes/receipts, FILE/CHAIN |
-| make test-stage4 | 9 | Trust/CRL errors, idempotent revocation, read-only plans, failed refresh |
+| make test-stage4 | 11 | Trust/CRL errors, idempotent revocation, read-only plans, failed refresh, root CRL display errors and empty/revoked lists |
 | make test-stage5 | 8 | Effective key/profile matrix, SANs, names, configuration completeness |
 | make test-stage6 | 15 | Interrupted commits, killed issuer, preserved replacements, publication resume |
 | make test-stage7 | 13 | Audit A01–A06, state loss, Make transport, key strength, SAN equality and UTF-8 |

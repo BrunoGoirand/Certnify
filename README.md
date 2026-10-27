@@ -281,6 +281,8 @@ leave earlier CRLs renewed and counters advanced. No CRL URLs are fetched or aut
 `verify-intermediate-revoked` fails for a revoked intermediate; it does not invert
 verification success. Inspection helpers include `show-intermediate-serial` and
 `crl-root-revoked` with an explicit authority selector.
+`crl-root-revoked` fails if the root CRL is missing or malformed; a valid CRL
+without revoked entries succeeds. Its display is informational, not a membership API.
 
 ## Lifecycle, batches and publication
 

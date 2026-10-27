@@ -65,6 +65,9 @@ and FILE/CHAIN compatibility; see [the batch contract](../specifications/07-life
 
 Suite 4 tests strict verification, validated CRL replacement, idempotence and
 read-only plans; see [the revocation contract](../specifications/06-verification-and-revocation.md).
+It also checks root revoked-entry display through Make and the direct script:
+empty/revoked CRLs succeed, missing/malformed CRLs and backend failures with
+partial output fail, and inspection preserves fixture state.
 
 Suite 5 tests effective keys/policy, SAN validation, safe CN names and config
 staging; see [the policy contract](../specifications/04-cryptography-and-profiles.md).

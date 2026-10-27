@@ -63,6 +63,46 @@ class Revocation(unittest.TestCase):
         self.make('revoke-intermediate', 'KIND=web')
         self.assertIn('VERIFY STATUS: REVOKED', self.verify(mode='info').stdout)
 
+    def test_root_revoked_display_crl_states(self):
+        self.make('crl-root')
+        crl = self.work / 'root/crl/ca.crl.pem'
+        valid = crl.read_bytes()
+        commands = [['make', 'crl-root-revoked', 'KIND=web'],
+                    ['bash', 'bin/crl.sh', 'root-revoked']]
+        for state in ['empty', 'missing', 'malformed', 'revoked']:
+            if state == 'missing':
+                crl.unlink()
+            elif state == 'malformed':
+                crl.write_text('invalid CRL\n')
+            elif state == 'revoked':
+                crl.write_bytes(valid)
+                self.make('revoke-intermediate', 'KIND=web')
+            for command in commands:
+                with self.subTest(state=state, command=command):
+                    before = snapshot(self.work)
+                    result = self.run_cmd(command, state in ['empty', 'revoked'], KIND='web')
+                    self.assertEqual(before, snapshot(self.work))
+                    if state == 'revoked':
+                        self.assertIn('Serial Number:', result.stdout)
+                    else:
+                        self.assertNotIn('Serial Number:', result.stdout)
+                    if state in ['missing', 'malformed']:
+                        self.assertTrue(result.stderr)
+                        self.assertNotIn('Local state durably synchronized', result.stderr)
+
+    def test_root_revoked_display_preserves_backend_failure(self):
+        self.make('crl-root')
+        wrapper = self.wrapper('if [[ "$1" == crl && " $* " == *" -text "* ]]; then printf "Revoked Certificates:\\n    Serial Number: 1000\\n"; exit 9; fi')
+        for command in [['make', 'crl-root-revoked', 'KIND=web'],
+                        ['bash', 'bin/crl.sh', 'root-revoked']]:
+            with self.subTest(command=command):
+                before = snapshot(self.work)
+                result = self.run_cmd(command, False, KIND='web', OPENSSL=wrapper)
+                self.assertEqual(before, snapshot(self.work))
+                self.assertIn('Serial Number:', result.stdout)
+                if command[0] == 'bash':
+                    self.assertEqual(result.returncode, 9)
+
     def test_invalid_crls_never_tolerated(self):
         self.crls()
         crl = self.ca / 'crl/ca.crl.pem'

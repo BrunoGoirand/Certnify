@@ -59,9 +59,10 @@ case "$operation" in
   root-revoked)
     serial="$(openssl_serial "$base/certs/ca.cert.pem")"
     colon="$(printf '%s' "$serial" | sed 's/../&:/g;s/:$//')"
+    # Tolerate an empty display, but preserve decoding and filter errors.
     "$OPENSSL" crl -in root/crl/ca.crl.pem -noout -text |
       sed -n '/Revoked Certificates:/,/Signature Algorithm/p' |
-      grep -E --color=always -n "Serial Number:[[:space:]]*($serial|$colon)|^|$" || true
+      { grep -E --color=always -n "Serial Number:[[:space:]]*($serial|$colon)|^|$" || [[ "$?" == 1 ]]; }
     ;;
   *) die "Unknown CRL operation: $operation" ;;
 esac

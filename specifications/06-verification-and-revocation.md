@@ -200,6 +200,10 @@ a retained historical signer and generation CRL path. crl-all visits matching
 intm-* directories with a configuration, including legacy authorities, not root.
 crl-show prints at most the first 120 lines of decoded CRL text. Root revoked-entry
 display is informational, not a structured membership API.
+`crl-root-revoked` returns nonzero when the root CRL cannot be read or decoded,
+even if the backend emits partial output. A valid CRL with no revoked entries
+is a successful display with no entries. Only the display filter's no-match
+status is tolerated; backend and filter errors remain failures.
 
 verify-intermediate-revoked runs verification with the root CRL: a valid unrevoked
 intermediate succeeds and a revoked one fails. Its name does not invert success.

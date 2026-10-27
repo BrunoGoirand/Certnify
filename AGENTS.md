@@ -1,10 +1,112 @@
-# AGENTS.md
+# Repository guidance
 
-This file provides guidance to agents when working with code in this repository.
+## Project and sources of truth
 
-## Stack
+Certnify is a local private-PKI toolkit: Bash scripts and a Make interface drive
+OpenSSL, with Python helpers for durability and publication. It manages roots,
+intermediates, certificates, revocation, CRLs and authority lifecycle operations.
 
-Bash/Make PKI toolkit (Certnify). No build step — scripts run directly. Runtime: OpenSSL 1.1.1 or 3.x (LibreSSL is explicitly refused). Tests require Python 3.8+. Qualified platform: macOS, Bash 3.2.57, GNU Make 3.81.
+- Start with `README.md`, `specifications/README.md` and `test/README.md`.
+- The English chapters in `specifications/` define current contracts. Chapter 10
+  maps acceptance scenarios to tests and records qualification limits.
+- `specifications/guides/` and the English/French READMEs document usage.
+- `draft/` is ignored, local planning material; proposals there are not implemented
+  features or authoritative contracts. Preserve it.
+
+## Code map
+
+- `Makefile`: public command adapters, defaults and parameter forwarding.
+- `bin/gen-*.sh`: authority and leaf issuance; specialized wrappers share
+  `gen-leaf.sh` and `pki-env.sh`.
+- `bin/pki-*.sh`, `bin/pki-*.awk`, `bin/pki-*.py`: shared parsing, policy,
+  state, validity, recovery, persistence and publication support.
+- Other `bin/` scripts implement verification, revocation, CRLs and lifecycle
+  operations such as rollover, rollback and batch reissuance.
+- `profiles/`: OpenSSL configuration fragments for new authorities and leaves.
+  Changing a fragment does not update an existing authority's `openssl.cnf`.
+- `test/stage0.py` through `test/stage13.py`: isolated regression suites;
+  `test/smoke.sh`: end-to-end smoke tests; `test/workspace.py`: fixture helpers.
+
+## Working conventions
+
+Verify the physical working directory, Git root and status before editing;
+preserve unrelated changes. Keep fixes scoped and update the owning specification
+and relevant usage documentation when observable behavior changes. Keep English
+and French documentation aligned for affected workflows.
+
+Write source comments and repository documentation in English, except for
+explicitly maintained translations such as the French documentation. When modifying
+code, translate non-English comments in the affected sections into English.
+Preserve useful comments and keep them aligned with behavior; explain reasons and
+constraints rather than restating syntax.
+
+Preserve Bash 3.2 and GNU Make 3.81 compatibility. Python requires 3.8 or newer.
+The backend gate accepts OpenSSL 1.1.1 and 3.x, rejects LibreSSL, and some operations
+require 3.x. Use `OPENSSL=/absolute/path/to/openssl` when needed. Accepted versions
+are not all qualified platforms; consult the recorded acceptance evidence.
+
+Follow nearby code conventions, including quoted expansions and strict error
+handling. Treat CNs, paths, SANs and Make parameters as data, never shell code.
+Preserve omitted-versus-empty input semantics and direct-script/Make parity.
+Keep policy and persistence logic in shared helpers rather than duplicating it in
+wrappers. Preserve fail-closed validation, issuer bindings, category restrictions,
+serial uniqueness and explicit partial-failure reporting.
+
+## Protect operational PKI data
+
+This checkout may contain real authority state. Do development and regression
+work in disposable fixtures, never by issuing or revoking against local authorities.
+Operational mutations require authorization for the intended operation and scope.
+Use native previews where supported; `DRY_RUN` is not universal.
+
+Do not print, copy into reports, stage or distribute private keys or recovery
+journals. Generated data belongs under `root/`, `intm-*/`, `intermediate/`,
+`pki-data/`, `out/`, `.locks/` and `.recovery/`, not in source packages.
+Custom authority paths need an explicit exclusion before generating data.
+
+Never reset counters, remove index rows, clear pending recovery evidence or steal
+locks to make a command succeed. Signing failures can leave committed issuance;
+CRL/publication failures do not undo revocation. Consult the reliability contract
+and recovery guide before any recovery action. `make clean` previews;
+`make clean CLEAN_APPLY=1` deletes authority material and is not development cleanup.
+
+## Validation
+
+Run commands from the repository root. There is no compilation step.
+
+```sh
+make help
+make test-stage0                    # source packaging and fixture isolation
+make test-stage5                    # example: key/profile/SAN policy regressions
+python3 -B test/stage1.py Records.test_serials_are_exact_and_monotonic
+make test-smoke                     # broader end-to-end validation
+git diff --check
+```
+
+Select relevant `make test-stageN` targets (0–13) using `test/README.md`; run broader
+suites when shared behavior changes. Use `bash -n path/to/changed-script.sh` for
+shell syntax checks. Add regression coverage for behavior changes, including
+rejection paths and assertions on permitted state changes.
+
+Fixtures must use `test/workspace.py` and its explicit
+`test/source-manifest.txt`. Add new runtime, profile and test files to that manifest
+deliberately. Never recursively copy this checkout into a fixture or infer source
+contents from tracked files: that can include operational data. Use generated
+fixture keys only; publication tests use local stubs.
+
+Report exactly which checks ran and their outcome. Distinguish targeted tests,
+full suites and historical evidence. Disposable tests do not establish real
+power-loss, network-filesystem or remote-publication qualification.
+
+## Code navigation with Serena
+
+Prefer the local Serena MCP server for code exploration.
+Read its initial instructions before the first coding task and verify
+that the active project matches this repository.
+Use symbol overviews, targeted symbol reads and reference searches
+before reading entire source files.
+Use text search for documentation, configuration and unsupported files.
+If Serena is unavailable, state that briefly and use local tools.
 
 ## Test Commands
 
