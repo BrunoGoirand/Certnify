@@ -41,9 +41,11 @@ Preserve useful comments and keep them aligned with behavior; explain reasons an
 constraints rather than restating syntax.
 
 Preserve Bash 3.2 and GNU Make 3.81 compatibility. Python requires 3.8 or newer.
-The backend gate accepts OpenSSL 1.1.1 and 3.x, rejects LibreSSL, and some operations
-require 3.x. Use `OPENSSL=/absolute/path/to/openssl` when needed. Accepted versions
-are not all qualified platforms; consult the recorded acceptance evidence.
+The backend gate accepts stable OpenSSL 1.1.1, 3.x and 4.1.x; other families and
+LibreSSL are rejected. OpenSSL 4.1.x admission is not full qualification, and the
+migration matrix/benchmark still have 3.x-only selection pending a separate change.
+Use `OPENSSL=/absolute/path/to/openssl` when needed. Accepted versions are not all
+qualified platforms; consult the recorded acceptance evidence.
 
 Follow nearby code conventions, including quoted expansions and strict error
 handling. Treat CNs, paths, SANs and Make parameters as data, never shell code.

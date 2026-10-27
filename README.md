@@ -37,8 +37,10 @@ be resumed without signing again; see the [recovery guide](specifications/guides
 
 Run commands from the project root with Bash, Make, OpenSSL and ordinary Unix
 utilities (`awk`, `sed`, `grep`, `mktemp`, `install`, `date`, `od`, `tr`, `iconv`, `sort`, and file tools).
-The backend gate accepts OpenSSL 1.1.1 or 3.x and rejects LibreSSL. Select another
-executable with `OPENSSL=/absolute/path/to/openssl`.
+The backend gate accepts stable OpenSSL 1.1.1, 3.x and 4.1.x releases and rejects
+LibreSSL and other release families. Select another executable with
+`OPENSSL=/absolute/path/to/openssl`. Admission of 4.1.x is not full qualification;
+see the [version policy and remaining limits](specifications/09-compatibility-and-limitations.md#openssl-backend-admission).
 
 The qualified environment is macOS, Bash 3.2.57, GNU Make 3.81 and OpenSSL 3.6.4.
 Other accepted versions/platforms are not thereby qualified. Python 3.8+ is required

@@ -47,7 +47,7 @@ CSRs and a temporary key, never an authority key.
 
 - The `gen-server.sh`, `gen-user.sh`, `gen-code.sh`, `gen-email.sh`, and `gen-archive.sh` scripts are lightweight wrappers around `gen-leaf.sh`.
 - Almost every script relies on `bin/pki-env.sh`, which acts as the shared foundation of the toolkit.
-- The project's main external dependency is `OpenSSL` (1.1.1 or 3.x, with LibreSSL explicitly rejected by `pki-env.sh`).
+- The project's main external dependency is `OpenSSL` (stable 1.1.1, 3.x or 4.1.x; LibreSSL and other families are rejected by `pki-env.sh`). Admission is distinct from qualification; see [chapter 09](../09-compatibility-and-limitations.md#openssl-backend-admission).
 - The dependencies listed here are the main ones visible in the scripts; they are not intended to be a fully exhaustive command-by-command matrix.
 
 See [commands and defaults](../02-commands-and-configuration.md) and [recovery](recovery-en.md).

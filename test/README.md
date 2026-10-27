@@ -54,12 +54,25 @@ the launch blocks in both project READMEs and this guide. This is a static
 consistency check, not execution of the listed suites or a new qualification.
 
 The qualified platform is macOS, Bash 3.2.57, GNU Make 3.81, OpenSSL 3.6.4 and
-Python 3.14.7. The OpenSSL 1.1.1/3.x executable gate does not qualify every accepted
-version. Newer Bash, other platforms/backends, network filesystems, power loss and
+Python 3.14.7. The stable OpenSSL 1.1.1/3.x/4.1.x executable gate does not qualify
+every accepted version. Newer Bash, other platforms/backends, network filesystems, power loss and
 actual remote publication remain unqualified. See the
 [acceptance map](../specifications/10-acceptance-and-traceability.md).
 
+Stage 2's `BackendAdmission` class tests stable/unsupported version banners,
+failed/missing version commands, full-response parsing, executable/library
+agreement and unchanged snapshots on rejection through Make and direct scripts.
+Synthetic banners only test admission policy. Its real-backend cases test
+bootstrap, direct root creation and retained lock/journal/fence guards using the
+selected `OPENSSL`; stage 0 also tests real Make root creation.
+
 ## OpenSSL backend matrix
+
+OpenSSL 4.1.x now passes runtime admission, but this tool's migration selection
+and the durability benchmark still require the separate tooling update: the
+matrix currently marks migration inapplicable for 4.1.x. Do not interpret its six
+common methods as complete 4.1.x coverage. See the
+[admission contract](../specifications/09-compatibility-and-limitations.md#openssl-backend-admission).
 
 The opt-in matrix tests actual executables, not directory labels or mocked version
 strings. Supply paths explicitly; it neither downloads nor installs a backend:
@@ -69,7 +82,6 @@ python3 -B test/openssl-matrix.py \
   --backend /absolute/path/to/openssl-1.1.1 \
   --backend /absolute/path/to/openssl-3 \
   --reject-backend /absolute/path/to/libressl \
-  --reject-backend /absolute/path/to/openssl-4 \
   --jobs 2 > /tmp/certnify-openssl-matrix.jsonl
 ```
 

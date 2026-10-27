@@ -165,11 +165,23 @@ canonicalize_path_allow_missing() {
 
 # ---- OpenSSL presence + version (refuse LibreSSL) ----
 require_openssl(){
-  command -v "$OPENSSL" >/dev/null 2>&1 || die "openssl not found in PATH"
-  local vstr; vstr="$("$OPENSSL" version)"
-  grep -q 'LibreSSL' <<<"$vstr" && die "LibreSSL non supporté"
-  grep -Eq 'OpenSSL (1\.1\.1[a-z]*|3\.[0-9]+\.[0-9]+)' <<<"$vstr" \
-    || die "OpenSSL 1.1.1 ou 3.x requis, trouvé: $vstr"
+  command -v "$OPENSSL" >/dev/null 2>&1 || die "OpenSSL executable not found: $OPENSSL"
+  local vstr version library_version banner_pattern release_pattern
+  vstr="$("$OPENSSL" version)" || die "Cannot query OpenSSL version: $OPENSSL"
+  [[ "$vstr" != *LibreSSL* ]] || die "LibreSSL is not supported"
+  # Match the complete standard banner, not a version embedded in other output.
+  # Dates are metadata; a reported library must match the executable version.
+  banner_pattern='^OpenSSL ([0-9A-Za-z.+-]+)( +[0-9]{1,2} [A-Za-z]{3} [0-9]{4})?( \(Library: OpenSSL ([0-9A-Za-z.+-]+)( +[0-9]{1,2} [A-Za-z]{3} [0-9]{4})?\))?$'
+  [[ "$vstr" =~ $banner_pattern ]] || die "Malformed OpenSSL version response"
+  version="${BASH_REMATCH[1]}"
+  library_version="${BASH_REMATCH[4]:-}"
+  [[ -z "$library_version" || "$library_version" == "$version" ]] \
+    || die "OpenSSL executable/library version mismatch: $version / $library_version"
+  # Only stable release tokens are admitted. Unknown families, prereleases and
+  # vendor-modified version suffixes require a separate compatibility decision.
+  release_pattern='^(1\.1\.1[a-z]*|3\.[0-9]+\.[0-9]+|4\.1\.[0-9]+)$'
+  [[ "$version" =~ $release_pattern ]] \
+    || die "Stable OpenSSL 1.1.1, 3.x or 4.1.x required; found: $version"
 }
 
 require_openssl

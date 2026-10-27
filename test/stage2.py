@@ -294,5 +294,131 @@ recovery_complete
                 self.assertEqual(before, snapshot(work))
 
 
+class BackendAdmission(unittest.TestCase):
+    """Version policy is distinct from real-backend cryptographic qualification."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='certnify-admission-')
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        self.work = self.base / 'work'
+        copy_sources(SOURCE, self.work)
+        self.env = {key: os.environ[key] for key in ('PATH', 'TMPDIR', 'OPENSSL') if key in os.environ}
+        self.env.update(LC_ALL='C', CN='Admission Root', KEY_ALG='EC', LOCK_TIMEOUT='0')
+        self.probe = self.base / 'version probe'
+        self.probe.write_text('''#!/bin/bash
+if [[ "$#" != 1 || "$1" != version ]]; then
+  echo 'Unexpected non-version backend call' >&2
+  exit 88
+fi
+printf '%s\\n' "$PROBE_BANNER"
+exit "${PROBE_STATUS:-0}"
+''')
+        self.probe.chmod(0o700)
+
+    def run_command(self, command, **env):
+        return subprocess.run(command, cwd=self.work, env=dict(self.env, **env),
+                              capture_output=True, text=True, timeout=45)
+
+    def root_commands(self):
+        return [['make', 'root'], ['bin/gen-root.sh']]
+
+    def assert_refused_unchanged(self, command, diagnostic, **env):
+        before = snapshot(self.work)
+        result = self.run_command(command, **env)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(diagnostic, result.stderr)
+        self.assertNotIn('Unexpected non-version backend call', result.stderr)
+        self.assertEqual(before, snapshot(self.work))
+
+    def test_stable_banners_admit_bootstrap_and_reach_lock_guard(self):
+        lock = self.work / '.locks/root-ca.lock'
+        lock.mkdir(parents=True)
+        (lock / 'pid').write_text(str(os.getpid()))
+        for banner in ['OpenSSL 1.1.1', 'OpenSSL 1.1.1w  11 Sep 2023',
+                       'OpenSSL 1.1.1za', 'OpenSSL 3.0.0', 'OpenSSL 3.5.9 29 Sep 2026',
+                       'OpenSSL 3.10.12', 'OpenSSL 4.1.0', 'OpenSSL 4.1.12',
+                       'OpenSSL 4.1.0 23 Oct 2026 (Library: OpenSSL 4.1.0 23 Oct 2026)']:
+            with self.subTest(banner=banner):
+                env = dict(OPENSSL=str(self.probe), PROBE_BANNER=banner)
+                before = snapshot(self.work)
+                result = self.run_command(['/bin/bash', '-c', 'source bin/pki-env.sh'], **env)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(before, snapshot(self.work))
+                for command in self.root_commands():
+                    self.assert_refused_unchanged(command, 'Timeout waiting for', **env)
+
+    def test_unsupported_and_malformed_banners_fail_before_mutation(self):
+        banners = ['LibreSSL 3.3.6', 'OpenSSL 1.0.2u', 'OpenSSL 1.1.0',
+                   'OpenSSL 1.1.10', 'OpenSSL 2.0.0', 'OpenSSL 4.0.3',
+                   'OpenSSL 4.2.0', 'OpenSSL 5.0.0', 'OpenSSL 14.1.0',
+                   'OpenSSL 4.10.0', 'OpenSSL 4.1', 'OpenSSL 4.1.0.1',
+                   'OpenSSL 4.1.0-alpha1', 'OpenSSL 4.1.0-beta2',
+                   'OpenSSL 4.1.0-rc1', 'OpenSSL 4.1.0-dev',
+                   'OpenSSL 3.7.0-beta1', 'OpenSSL 1.1.1-pre1',
+                   'OpenSSL 4.1.0+vendor', 'OpenSSL 4.1.0-vendor',
+                   'OpenSSL 4.1.0 vendor', '', 'not OpenSSL 4.1.0',
+                   'OpenSSL 4.1.0\nOpenSSL 3.5.9', 'OpenSSL 4.1.0\r',
+                   'OpenSSL 4.1.0 (Library: OpenSSL 3.5.9)',
+                   'OpenSSL 4.1.0 (Library: LibreSSL 4.1.0)']
+        # The conditional context disables implicit errexit in sourced code;
+        # refusal must still be explicit and must not return to the caller.
+        commands = self.root_commands() + [['/bin/bash', '-c',
+                    'if source bin/pki-env.sh; then exit 0; else exit 99; fi']]
+        for banner in banners:
+            for command in commands:
+                with self.subTest(banner=banner, command=command):
+                    self.assert_refused_unchanged(command, '[ERR]',
+                                                 OPENSSL=str(self.probe), PROBE_BANNER=banner)
+
+    def test_failed_or_missing_version_command_fails_closed(self):
+        for command in self.root_commands() + [['/bin/bash', '-c',
+                'if source bin/pki-env.sh; then exit 0; else exit 99; fi']]:
+            with self.subTest(command=command):
+                self.assert_refused_unchanged(command, 'Cannot query OpenSSL version',
+                    OPENSSL=str(self.probe), PROBE_BANNER='OpenSSL 4.1.0', PROBE_STATUS='7')
+                self.assert_refused_unchanged(command, 'OpenSSL executable not found',
+                                             OPENSSL=str(self.base / 'missing'))
+
+    def test_real_backend_bootstrap_and_direct_root(self):
+        before = snapshot(self.work)
+        result = self.run_command(['/bin/bash', '-c', 'source bin/pki-env.sh'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(before, snapshot(self.work))
+        result = self.run_command(['bin/gen-root.sh'])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        after = snapshot(self.work)
+        self.assertEqual(after['root/serial']['content'], '1000\n')
+        self.assertEqual(after['root/index.txt']['content'], '')
+        self.assertEqual(after['root/private/ca.key.pem']['mode'], '0600')
+        self.assertEqual(len(after['root/certs/ca.cert.pem']['certificate_der_sha256']), 1)
+        self.assertFalse((self.work / '.locks/root-ca.lock').exists())
+        self.assertFalse((self.work / '.recovery/power-loss').exists())
+        for name, entry in before.items():
+            self.assertEqual(entry, after[name], name)
+
+    def test_real_backend_preserves_operation_guards(self):
+        for guard, diagnostic in [('lock', 'Timeout waiting for'),
+                                  ('journal', 'Unresolved operation'),
+                                  ('fence', 'Unresolved power-loss operation')]:
+            with self.subTest(guard=guard):
+                self.work = self.base / guard
+                copy_sources(SOURCE, self.work)
+                (self.work / '.locks').mkdir()
+                if guard == 'lock':
+                    lock = self.work / '.locks/root-ca.lock'
+                    lock.mkdir()
+                    (lock / 'pid').write_text(str(os.getpid()))
+                elif guard == 'journal':
+                    (self.work / '.recovery/pending').mkdir(parents=True)
+                else:
+                    # Create a genuine fence in this disposable workspace only.
+                    result = self.run_command(['python3', '-B', 'bin/pki-durable.py',
+                                               'begin', str(self.work), str(os.getpid())])
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                for command in self.root_commands():
+                    self.assert_refused_unchanged(command, diagnostic)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

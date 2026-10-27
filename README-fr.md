@@ -40,8 +40,11 @@ incident arbitraire. Les coupures matérielles réelles restent à qualifier. Vo
 
 Exécuter les commandes depuis la racine du projet avec Bash, Make, OpenSSL et les
 utilitaires Unix usuels (`awk`, `sed`, `grep`, `mktemp`, `install`, `date`, `od`, `tr`,
-`iconv`, `sort` et outils de fichiers). Le contrôle de version accepte OpenSSL 1.1.1 ou 3.x et refuse
-LibreSSL. Choisir un autre exécutable avec `OPENSSL=/chemin/absolu/vers/openssl`.
+`iconv`, `sort` et outils de fichiers). Le contrôle de version accepte les versions
+stables OpenSSL 1.1.1, 3.x et 4.1.x ; LibreSSL et les autres familles sont refusés.
+Choisir un autre exécutable avec `OPENSSL=/chemin/absolu/vers/openssl`. L’admission
+de 4.1.x ne constitue pas une qualification complète ; consulter la
+[politique de versions et les limites restantes](specifications/09-compatibility-and-limitations.md#openssl-backend-admission).
 
 L’environnement qualifié est macOS, Bash 3.2.57, GNU Make 3.81 et OpenSSL 3.6.4.
 L’acceptation d’autres versions ne constitue pas leur qualification. Python 3.8+

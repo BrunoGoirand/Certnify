@@ -57,9 +57,9 @@ in chapter 01.
 ## Qualification and security boundaries
 
 Historical full qualification used macOS with Bash 3.2.57, GNU Make 3.81,
-OpenSSL 3.6.4 and Python 3.14.7. The executable gate accepts OpenSSL 1.1.1/3.x
-and rejects LibreSSL and OpenSSL 4.x; acceptance is not testing or a vendor-support
-claim. The opt-in [backend matrix](../test/README.md#openssl-backend-matrix) exercises
+OpenSSL 3.6.4 and Python 3.14.7. The executable gate accepts stable OpenSSL 1.1.1/3.x/4.1.x
+and rejects LibreSSL and other release families; acceptance is not testing or a
+vendor-support claim. The opt-in [backend matrix](../test/README.md#openssl-backend-matrix) exercises
 real executable identities against the ASN.1, key metadata, CRL, date and strict
 verification contracts, with preserving migration tested separately on 3.x.
 Aliases of one installed executable do not qualify additional versions.
@@ -72,3 +72,32 @@ Keys are unencrypted files under restrictive permissions. Use the documented dat
 locations or add explicit exclusions for custom locations before generation. Git
 ignore rules do not remove tracked secrets or constitute a history audit. Source
 packages use an explicit manifest and never copy operational PKI state.
+
+## OpenSSL backend admission
+
+The shared bootstrap accepts stable release tokens `1.1.1` (with optional
+lowercase patch letters), `3.MINOR.PATCH` and `4.1.PATCH`, where MINOR/PATCH are
+nonempty decimal digits. OpenSSL 4.0, 4.2 and unknown major families are refused.
+Prerelease/development tokens and attached vendor suffixes (`-beta`, `-dev`,
+`+vendor`, etc.) are refused. No automatic future-major acceptance is implied.
+
+`openssl version` must succeed and return a complete standard `OpenSSL VERSION`
+banner, optionally followed by a release date and an optional
+`(Library: OpenSSL VERSION [date])` field. The library version, if present, must
+match the executable version exactly. Date fields have day/month/year syntax;
+they are metadata, not a release-authenticity or calendar-validity check. Embedded
+banners, extra lines, arbitrary vendor annotations and malformed output fail
+closed. The normal trailing command newline is ignored. This is an executable
+identity/admission policy, not verification of the binary's provenance.
+
+Both Make and direct scripts use this gate before operational admission. Accepting
+a backend never bypasses the workspace lock, pending recovery journal or durable
+operation fence. Rejected identities and failed/missing version commands must
+leave fixture state unchanged, including in shell contexts that suppress errexit.
+
+OpenSSL 4.1.x is admitted at this stage; full functional and mixed-backend lifecycle
+qualification is still pending. The backend matrix's migration selection and the
+preserving-batch benchmark remain 3.x-only until the separate tooling slice is
+implemented. A matrix result without that migration scenario cannot establish
+4.1.x migration coverage. Existing migration preflight and cryptographic policy
+are unchanged. See the [slice-1 evidence](10-acceptance-and-traceability.md#openssl-41-admission-slice-1-2026-10-27).

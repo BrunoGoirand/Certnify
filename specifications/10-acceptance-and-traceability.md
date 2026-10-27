@@ -5,6 +5,49 @@ Use disposable source-only workspaces and newly generated keys. Capture current
 time around issuance for lifetime checks. Python 3.8+ is also a runtime dependency
 of the durability helper. See [test/README.md](../test/README.md) for execution and packaging.
 
+## OpenSSL 4.1 admission slice 1 (2026-10-27)
+
+The shared version gate now admits stable 1.1.1, 3.x and 4.1.x releases under the
+[complete-banner policy](09-compatibility-and-limitations.md#openssl-backend-admission).
+Other families, prereleases, vendor-suffixed tokens, malformed responses and
+executable/library version mismatches are rejected. A failing version command
+cannot be accepted even when it prints a supported banner or the caller suppresses
+implicit shell errexit. This change does not alter cryptographic policy or bypass
+transaction/recovery admission.
+
+Five new `BackendAdmission` methods in `test/stage2.py` cover stable banners,
+unsupported/malformed banners, failed/missing commands, real bootstrap/direct
+root creation and real lock/journal/fence guards. Mock banners test version policy
+only; real-backend tests use manifest-only disposable fixtures. Rejections through
+Make and direct scripts assert unchanged snapshots; the real root case checks
+source preservation, empty initial index, serial, certificate, key permissions
+and completion cleanup. Stage 0 covers real Make root generation.
+
+Executed on macOS 26.7.1 x86_64, Bash 3.2.57, GNU Make 3.81 and Python 3.15.2:
+
+| Executable / actual version | Command from repository root | Result |
+| --- | --- | --- |
+| `/usr/local/bin/openssl` / 4.1.0 | `OPENSSL=/usr/local/bin/openssl python3 -B test/stage2.py BackendAdmission` | 5/5 passed |
+| `/usr/local/bin/openssl` / 4.1.0 | `OPENSSL=/usr/local/bin/openssl make test-stage0` | 5/5 passed |
+| `/usr/local/bin/openssl` / 4.1.0 | `OPENSSL=/usr/local/bin/openssl make test-stage2` | 17/17 passed |
+| `/usr/local/opt/openssl@3/bin/openssl` / 3.5.9 | `OPENSSL=/usr/local/opt/openssl@3/bin/openssl python3 -B test/stage2.py BackendAdmission ShellContext` | 8/8 passed |
+| `/tmp/certnify-r3-openssl.sSpJ2u/install/bin/openssl` / 1.1.1w | `OPENSSL=/tmp/certnify-r3-openssl.sSpJ2u/install/bin/openssl python3 -B test/stage2.py BackendAdmission` | 5/5 passed |
+| `/usr/bin/openssl` / LibreSSL 3.3.6 | `python3 -B test/openssl-matrix.py --reject-backend /usr/bin/openssl` | Exit 0; both expected Make/direct refusals passed with unchanged snapshots |
+
+The temporary 1.1.1w installation is the complete installation described in the
+earlier matrix evidence; the path is ephemeral. Syntax checking with
+`bash -n bin/pki-env.sh`, Python 3.8 grammar parsing of the changed test file,
+local documentation link targets and `git diff --check` passed.
+
+The initial five-method 4.1.0 run is included in the subsequent complete stage-2
+run, not five additional distinct scenarios. Stages 0 and 2 were run in full on
+4.1.0; the complete set of numbered suites and smoke were not run. Mixed-backend
+lifecycle, other platforms, real power loss and remote publication qualification
+remain outside this slice. The backend
+matrix's migration selector and the durability benchmark remain unchanged and
+3.x-only pending slice 2. Admission must not be described as completed 4.1.x
+functional qualification.
+
 ## Executable gates
 
 The exclusive-writer requirement in chapter 01 also needs deployment acceptance:
@@ -23,7 +66,7 @@ process termination and mocked barriers do not satisfy that qualification.
 | --- | ---: | --- |
 | make test-stage0 | 5 | Source manifest, exclusions, root bootstrap, snapshots, current test-map consistency |
 | make test-stage1 | 10 | Strict record parsing, serial arithmetic, CN selection, inventories |
-| make test-stage2 | 12 | Canonical paths, generations, concurrency, rollover/rollback, completed bootstrap and same-shell ownership/trap contracts |
+| make test-stage2 | 17 | Backend admission, canonical paths, generations, concurrency, rollover/rollback, completed bootstrap and same-shell ownership/trap contracts |
 | make test-stage3 | 8 | Actual command adapters, batch outcomes/receipts, FILE/CHAIN |
 | make test-stage4 | 11 | Trust/CRL errors, idempotent revocation, read-only plans, failed refresh, root CRL display errors and empty/revoked lists |
 | make test-stage5 | 10 | Effective key/profile matrix, SANs, names, configuration completeness |
@@ -174,6 +217,9 @@ parse with the Python 3.8 grammar. Local documentation link targets and
 power-loss, network-filesystem or remote-publication qualification is implied.
 
 ## OpenSSL backend matrix (2026-10-27)
+
+This historical run predates the [4.1 admission change](#openssl-41-admission-slice-1-2026-10-27).
+Its 4.1.0 rejection results describe the previous gate.
 
 Risk R3 now has an opt-in executable compatibility gate,
 `test/openssl-matrix.py`, with six common behavioral methods and one additional
