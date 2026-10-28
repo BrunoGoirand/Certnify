@@ -56,6 +56,11 @@ in chapter 01.
 
 ## Qualification and security boundaries
 
+Current full functional acceptance passed with OpenSSL 4.1.0 on macOS 26.7.1
+x86_64, Bash 3.2.57, GNU Make 3.81 and Python 3.15.2: 162 numbered-suite methods
+(stages 0–14) and smoke. See the [support table](#openssl-support-and-evidence)
+for the distinction between full acceptance and targeted backend checks.
+
 Historical full qualification used macOS with Bash 3.2.57, GNU Make 3.81,
 OpenSSL 3.6.4 and Python 3.14.7. The executable gate accepts stable OpenSSL 1.1.1/3.x/4.1.x
 and rejects LibreSSL and other release families; acceptance is not testing or a
@@ -64,8 +69,9 @@ real executable identities against the ASN.1, key metadata, CRL, date and strict
 verification contracts, with preserving migration selected on admitted 3.x and
 4.1.x backends.
 Aliases of one installed executable do not qualify additional versions.
-Current targeted results and untested combinations are recorded in
-[chapter 10](10-acceptance-and-traceability.md#openssl-backend-matrix-2026-10-27).
+Current results and untested combinations are recorded in the
+[support table](#openssl-support-and-evidence) and
+[chapter 10](10-acceptance-and-traceability.md#openssl-41-qualification-slice-4-2026-10-28).
 Other backend versions, Linux/newer Bash, actual remote publishers and network
 filesystems still need their own qualification.
 
@@ -96,8 +102,8 @@ a backend never bypasses the workspace lock, pending recovery journal or durable
 operation fence. Rejected identities and failed/missing version commands must
 leave fixture state unchanged, including in shell contexts that suppress errexit.
 
-OpenSSL 4.1.x is admitted at this stage; full functional and mixed-backend lifecycle
-qualification is still pending. The backend matrix selects seven methods for
+Admission and qualification have separate scopes as recorded in the
+[support table](#openssl-support-and-evidence). The backend matrix selects seven methods for
 admitted 3.x and 4.1.x, including preserving migration; 1.1.1 retains six common
 methods and an explicit inapplicable migration record. The benchmark uses the
 same feature selector after nonmutating runtime admission in a disposable source
@@ -116,3 +122,24 @@ bypassing pending recovery, removing fences or weakening strict verification.
 Evidence for a tested pair does not qualify all builds, imported policies or
 arbitrary interrupted operations. See the
 [slice-3 results](10-acceptance-and-traceability.md#openssl-41-transitions-slice-3-2026-10-28).
+
+## OpenSSL support and evidence
+
+Admission applies to the stable release families below. Feature availability
+still depends on the actual capability preflight and configured cryptographic
+policy. Qualification applies only to the exact tested builds and environment,
+not every release admitted by the gate.
+
+| Backend | Admission | Feature availability | Targeted compatibility | Full numbered suites and smoke |
+| --- | --- | --- | --- | --- |
+| OpenSSL 4.1.0 | Accepted | Core operations and preserving migration | Slice 3: real matrix 7/7 and two transition methods with 3.5.9 | 162/162 methods (stages 0–14) and smoke passed on macOS 26.7.1 x86_64 / Python 3.15.2 |
+| Other stable 4.1.x | Accepted | Same feature selection; actual preflight required | No other patch/build tested | Not qualified |
+| Stable OpenSSL 3.x | Accepted | Core operations and preserving migration | 3.5.9: matrix 7/7, full stage 2 17/17 and mixed-backend transitions | No current full 3.x run; historical 3.6.4 evidence belongs to its recorded source/environment snapshot |
+| Stable OpenSSL 1.1.1 | Accepted | Core operations; preserving migration and its benchmark unavailable | 1.1.1w: common matrix 6/6 | No full current-suite qualification |
+| LibreSSL, 4.0, 4.2, unknown families and malformed/prerelease identities | Rejected | None | Real LibreSSL 3.3.6 rejected through Make/direct scripts; other unsupported identities tested with synthetic stage-2 responses | Not applicable |
+
+See the [dated acceptance record](10-acceptance-and-traceability.md#openssl-41-qualification-slice-4-2026-10-28)
+for commands, counts and build identities. The 3.5.9/4.1.0 transition results are
+[recorded separately](10-acceptance-and-traceability.md#openssl-41-transitions-slice-3-2026-10-28).
+These results do not qualify Linux, other architectures, nondefault/FIPS providers,
+network filesystems, real power loss or actual remote publication.

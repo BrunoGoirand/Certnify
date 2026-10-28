@@ -24,7 +24,7 @@ intermediates, certificates, revocation, CRLs and authority lifecycle operations
   operations such as rollover, rollback and batch reissuance.
 - `profiles/`: OpenSSL configuration fragments for new authorities and leaves.
   Changing a fragment does not update an existing authority's `openssl.cnf`.
-- `test/stage0.py` through `test/stage13.py`: isolated regression suites;
+- `test/stage0.py` through `test/stage14.py`: isolated regression suites;
   `test/smoke.sh`: end-to-end smoke tests; `test/workspace.py`: fixture helpers.
 
 ## Working conventions
@@ -42,7 +42,8 @@ constraints rather than restating syntax.
 
 Preserve Bash 3.2 and GNU Make 3.81 compatibility. Python requires 3.8 or newer.
 The backend gate accepts stable OpenSSL 1.1.1, 3.x and 4.1.x; other families and
-LibreSSL are rejected. OpenSSL 4.1.x admission is not full qualification.
+LibreSSL are rejected. Admission is not qualification of every accepted build;
+see chapter 09's support table and chapter 10's dated acceptance evidence.
 Preserving migration and its matrix/benchmark require admitted 3.x or 4.1.x.
 Use `OPENSSL=/absolute/path/to/openssl` when needed. Accepted versions are not all
 qualified platforms; consult the recorded acceptance evidence.
@@ -85,7 +86,7 @@ make test-smoke                     # broader end-to-end validation
 git diff --check
 ```
 
-Select relevant `make test-stageN` targets (0–13) using `test/README.md`; run broader
+Select relevant `make test-stageN` targets (0–14) using `test/README.md`; run broader
 suites when shared behavior changes. Use `bash -n path/to/changed-script.sh` for
 shell syntax checks. Add regression coverage for behavior changes, including
 rejection paths and assertions on permitted state changes.
@@ -128,6 +129,7 @@ make test-stage10                # Hold/release, relocation
 make test-stage11                # Durable operations (power-loss fencing)
 make test-stage12                # Authority issuance categories
 make test-stage13                # Security: hooks, publication, FIFO hardening
+make test-stage14                # Leaf inventory exports
 ```
 
 To run a single test method: `python3 -B test/stageN.py ClassName.test_method_name`

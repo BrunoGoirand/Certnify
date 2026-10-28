@@ -39,7 +39,7 @@ Voir aussi `profiles-fr.md` pour la référence des profils OpenSSL utilisés pa
 
 - Les scripts `gen-server.sh`, `gen-user.sh`, `gen-code.sh`, `gen-email.sh` et `gen-archive.sh` sont des wrappers légers autour de `gen-leaf.sh`.
 - Presque tous les scripts s'appuient sur `bin/pki-env.sh`, qui joue le rôle de socle commun du toolkit.
-- La dépendance externe structurante du projet est `OpenSSL` (versions stables 1.1.1, 3.x ou 4.1.x ; LibreSSL et les autres familles sont refusés par `pki-env.sh`). L’admission est distincte de la qualification ; voir le [chapitre 09](../09-compatibility-and-limitations.md#openssl-backend-admission).
+- La dépendance externe structurante du projet est `OpenSSL` (versions stables 1.1.1, 3.x ou 4.1.x ; LibreSSL et les autres familles sont refusés par `pki-env.sh`). L’admission est distincte de la qualification ; voir le [chapitre 09](../09-compatibility-and-limitations.md#openssl-support-and-evidence).
 - Les dépendances listées ici sont les principales dépendances visibles dans les scripts ; elles ne prétendent pas être une matrice exhaustive commande par commande.
 
 Voir les [commandes et valeurs par défaut](../02-commands-and-configuration.md) et le [guide de reprise](recovery-fr.md).

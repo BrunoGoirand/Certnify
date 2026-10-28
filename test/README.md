@@ -53,11 +53,14 @@ Stage 0 checks current acceptance-table method counts, Make suite targets and
 the launch blocks in both project READMEs and this guide. This is a static
 consistency check, not execution of the listed suites or a new qualification.
 
-The qualified platform is macOS, Bash 3.2.57, GNU Make 3.81, OpenSSL 3.6.4 and
-Python 3.14.7. The stable OpenSSL 1.1.1/3.x/4.1.x executable gate does not qualify
-every accepted version. Newer Bash, other platforms/backends, network filesystems, power loss and
-actual remote publication remain unqualified. See the
-[acceptance map](../specifications/10-acceptance-and-traceability.md).
+The current acceptance environment is macOS 26.7.1 x86_64, Bash 3.2.57,
+GNU Make 3.81, OpenSSL 4.1.0 and Python 3.15.2. All 162 numbered-suite methods
+(stages 0–14) and smoke passed. The stable OpenSSL
+1.1.1/3.x/4.1.x executable gate does not qualify every accepted version.
+See the [support table](../specifications/09-compatibility-and-limitations.md#openssl-support-and-evidence)
+and the [dated results](../specifications/10-acceptance-and-traceability.md#openssl-41-qualification-slice-4-2026-10-28).
+Newer Bash, other platforms/backends, network filesystems, real power loss and
+actual remote publication remain unqualified.
 
 Stage 2's `BackendAdmission` class tests stable/unsupported version banners,
 failed/missing version commands, full-response parsing, executable/library

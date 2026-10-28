@@ -5,6 +5,113 @@ Use disposable source-only workspaces and newly generated keys. Capture current
 time around issuance for lifetime checks. Python 3.8+ is also a runtime dependency
 of the durability helper. See [test/README.md](../test/README.md) for execution and packaging.
 
+## OpenSSL 4.1 qualification slice 4 (2026-10-28)
+
+The release qualification uses the source baseline
+`8615d544a467dcec094a38bdf450df320a62bcf0` plus the documentation updates in this
+slice. Runtime and test behavior are unchanged from that baseline. Fixtures are copied only from the
+manifest and use generated keys; no operational authority or remote publisher
+is involved.
+
+Environment: macOS 26.7.1 x86_64, Bash 3.2.57, GNU Make 3.81, Python 3.15.2
+(Clang 21.0.0). Python 3.8 compatibility is a grammar check, not a runtime test.
+Up to three independent validation commands run concurrently; each command uses
+an explicit backend and a stripped environment. The orchestration retains command
+status, duration, unittest counts and failed method names; raw captured backend
+output, private keys and recovery journals are not retained in reports. Numbered suites retain their own
+disposable-workspace isolation and command timeouts.
+
+Actual executable identities (symlinks resolved):
+
+| Version | Executable | SHA-256 |
+| --- | --- | --- |
+| OpenSSL 4.1.0 | `/usr/local/Cellar/openssl@4/4.1.0/bin/openssl` | `ba60e673f9c8487e653afa4f6690d52baeab61c2443c708bc9f11f8a72628561` |
+| OpenSSL 3.5.9 | `/usr/local/Cellar/openssl@3/3.5.9/bin/openssl` | `dc503bb34895694f86043c7818209176c5d5279a3202e288f979da06df03ec32` |
+| OpenSSL 1.1.1w | `/private/tmp/certnify-r3-openssl.sSpJ2u/install/bin/openssl` | `bb588a405d45288442d01780a67a51b4548e2063e6b22c12b9255493f2b9a6f4` |
+| LibreSSL 3.3.6 | `/usr/bin/openssl` | `70c98d6d2b34f05383fc983d042193aa3bba908c13d30879a9f18866b02eeb5d` |
+
+`version -a` reports `darwin64-x86_64-cc` and 64-bit bignums for all three OpenSSL
+builds. OpenSSL 4.1.0 was built on 2026-10-23 at 12:16:44 UTC with clang, `-O3`,
+`-fPIC` and `-arch x86_64`; its OPENSSLDIR is `/usr/local/etc/openssl@4` and its
+MODULESDIR is `/usr/local/Cellar/openssl@4/4.1.0/lib/ossl-modules`. OpenSSL 3.5.9
+was built on 2026-09-29 at 14:05 UTC with the same architecture/optimization
+settings; configuration and modules are under `/usr/local/etc/openssl@3` and
+`/usr/local/Cellar/openssl@3/3.5.9/lib/ossl-modules`. The existing complete 1.1.1w
+temporary installation was built on 2026-10-27 at 16:18:06 UTC; its configuration
+directory is `/tmp/certnify-r3-openssl.sSpJ2u/install/ssl`. Its archived-source and
+build provenance are recorded in the earlier backend-matrix section. No FIPS
+provider or nondefault provider configuration is qualified by these runs.
+
+Commands are run from the repository root. Full 4.1.0 acceptance uses
+`OPENSSL=/usr/local/bin/openssl make test-stageN` separately for every N from 0
+through 14, followed in the validation schedule by
+`OPENSSL=/usr/local/bin/openssl make test-smoke`. Compatibility uses:
+
+```sh
+python3 -B test/openssl-matrix.py \
+  --backend /usr/local/opt/openssl@3/bin/openssl \
+  --backend /tmp/certnify-r3-openssl.sSpJ2u/install/bin/openssl \
+  --reject-backend /usr/bin/openssl --jobs 1
+```
+
+Full OpenSSL 4.1.0 acceptance results:
+
+| Command | Passed methods | Elapsed seconds |
+| --- | --- | --- |
+| `make test-stage0` | 5/5 | 8.881 |
+| `make test-stage1` | 10/10 | 109.265 |
+| `make test-stage2` | 17/17 | 526.467 |
+| `make test-stage3` | 8/8 | 382.990 |
+| `make test-stage4` | 11/11 | 606.649 |
+| `make test-stage5` | 10/10 | 575.398 |
+| `make test-stage6` | 16/16 | 676.453 |
+| `make test-stage7` | 13/13 | 562.135 |
+| `make test-stage8` | 14/14 | 743.626 |
+| `make test-stage9` | 8/8 | 403.631 |
+| `make test-stage10` | 11/11 | 560.099 |
+| `make test-stage11` | 15/15 | 244.045 |
+| `make test-stage12` | 8/8 | 586.370 |
+| `make test-stage13` | 7/7 | 90.049 |
+| `make test-stage14` | 9/9 | 333.088 |
+
+Total: **162/162 numbered-suite methods passed**. `make test-smoke`
+also passed (exit zero, 308.690 seconds). All commands selected
+`OPENSSL=/usr/local/bin/openssl`. No runtime/test correction or failed functional
+gate occurred in this slice.
+
+The broader shared-helper regression command
+`OPENSSL=/usr/local/opt/openssl@3/bin/openssl make test-stage2` also passed
+**17/17** on 3.5.9 (547.037 seconds). It started after the earlier
+numbered suites had released a slot; the three-command concurrency bound was
+retained. This is a complete stage-2 run, not a complete 3.x acceptance run.
+
+Static validation passed: `make help`, `bash -n` on all 35 manifest-listed shell
+files, Python 3.8 grammar parsing of all 23 manifest-listed Python files, local
+Markdown links/anchors and `git diff --check`. English/French requirements and
+shell guides are aligned. Python grammar acceptance does not establish Python
+3.8 runtime compatibility.
+
+After the documentation updates,
+`OPENSSL=/usr/local/bin/openssl python3 -B test/stage0.py StageZero.test_current_acceptance_map_matches_executable_gates`
+passed again; the documentation-only changes did not require rerunning the
+functional suites.
+
+Targeted compatibility results from this slice:
+
+| Backend | Result |
+| --- | --- |
+| OpenSSL 3.5.9 | Admission and 7/7 matrix methods passed, including preserving migration |
+| OpenSSL 1.1.1w | Admission and 6/6 common matrix methods passed; preserving migration explicitly not applicable |
+| LibreSSL 3.3.6 | Both expected Make/direct refusals passed with unchanged fixture snapshots |
+
+The matrix command exited zero. Its methods overlap the numbered suites and
+must not be added to the full-suite count as distinct scenarios.
+
+The full-suite results, targeted compatibility and earlier transition evidence
+are separate forms of evidence. These tests do not qualify Linux, other CPU
+architectures, Python 3.8 at runtime, network storage, real power loss, arbitrary
+production policies or real remote publication.
+
 ## OpenSSL 4.1 admission slice 1 (2026-10-27)
 
 This section records the end-of-slice-1 state. The subsequent

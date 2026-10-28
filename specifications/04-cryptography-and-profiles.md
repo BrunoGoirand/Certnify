@@ -2,7 +2,11 @@
 
 ## Backend and keys
 
-The shared library accepts version strings matching OpenSSL 1.1.1 (including letter suffixes) or OpenSSL 3.x and rejects LibreSSL. This specifies the existing executable gate, not a claim about vendor support lifetimes.
+The shared bootstrap accepts stable OpenSSL 1.1.1 (including lowercase patch
+letters), 3.x and 4.1.x, and rejects LibreSSL and other release families. See the
+[complete-banner admission policy](09-compatibility-and-limitations.md#openssl-backend-admission)
+and [support evidence](09-compatibility-and-limitations.md#openssl-support-and-evidence).
+Admission is not a claim about vendor support lifetimes.
 
 RSA uses `genpkey -algorithm RSA` and a configurable bit count, default 4096 and minimum 2048 bits. The minimum also applies to reused keys. Issuance and ordinary chain verification explicitly use OpenSSL authentication level 2. EC uses named parameters with prime256v1, secp384r1, or secp521r1 only. EdDSA uses Ed25519 or Ed448; an explicit variant in `KEY_ALG` overrides `KEY_EDDSA`. No passphrase is requested and no key encryption is configured.
 

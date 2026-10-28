@@ -92,8 +92,10 @@ read. Ambient subject/SAN/profile/key options cannot replace the source values.
 The actual issued subject and extensions are checked again before installation;
 a post-commit mismatch leaves a recovery journal and a review-required receipt.
 This mode requires certificate-to-CSR extension copying on an admitted OpenSSL
-3.x or 4.1.x backend. The actual preflight remains authoritative: inability to
-preserve subjectAltName in the CSR is a capability failure, not a reason to fall
+3.x or 4.1.x backend. See the [support table](09-compatibility-and-limitations.md#openssl-support-and-evidence)
+for tested versions and qualification limits. The actual preflight remains
+authoritative: inability to preserve subjectAltName in the CSR is a capability
+failure, not a reason to fall
 back silently to cn-only mode. It does not
 add a Python runtime dependency.
 

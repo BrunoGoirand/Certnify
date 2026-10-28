@@ -39,13 +39,16 @@ Run commands from the project root with Bash, Make, OpenSSL and ordinary Unix
 utilities (`awk`, `sed`, `grep`, `mktemp`, `install`, `date`, `od`, `tr`, `iconv`, `sort`, and file tools).
 The backend gate accepts stable OpenSSL 1.1.1, 3.x and 4.1.x releases and rejects
 LibreSSL and other release families. Select another executable with
-`OPENSSL=/absolute/path/to/openssl`. Admission of 4.1.x is not full qualification;
-see the [version policy and remaining limits](specifications/09-compatibility-and-limitations.md#openssl-backend-admission).
+`OPENSSL=/absolute/path/to/openssl`. See the
+[support table](specifications/09-compatibility-and-limitations.md#openssl-support-and-evidence)
+for admission, feature availability and tested configurations.
 
-The qualified environment is macOS, Bash 3.2.57, GNU Make 3.81 and OpenSSL 3.6.4.
-Other accepted versions/platforms are not thereby qualified. Python 3.8+ is required
-at runtime for persistence barriers as well as for tests; the recorded environment
-uses Python 3.14.7. The durability helper supports macOS and Linux, fails closed
+The current [acceptance record](specifications/10-acceptance-and-traceability.md#openssl-41-qualification-slice-4-2026-10-28)
+uses macOS 26.7.1 x86_64, Bash 3.2.57, GNU Make 3.81, OpenSSL 4.1.0 and
+Python 3.15.2: all 162 methods in stages 0–14 and the smoke test passed.
+Other admitted versions/platforms are not thereby qualified.
+Python 3.8+ is required at runtime for persistence barriers as well as for tests.
+The durability helper supports macOS and Linux, fails closed
 on unsupported barriers, and requires a single local filesystem. External writers,
 including synchronization agents modifying live PKI files, are prohibited.
 
