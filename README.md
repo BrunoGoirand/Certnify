@@ -51,6 +51,9 @@ including synchronization agents modifying live PKI files, are prohibited.
 
 Additional versions can be checked with the opt-in
 [OpenSSL backend matrix](test/README.md#openssl-backend-matrix).
+The [backend transition suite](test/README.md#openssl-backend-transitions) checks
+a selected 3.x/4.1.x pair through upgrade, switching back and verified installation
+resume using disposable PKIs.
 Its targeted compatibility results are distinct from full platform qualification.
 
 ## Quick start

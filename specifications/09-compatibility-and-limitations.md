@@ -105,3 +105,14 @@ package. Neither tool treats version selection as proof of feature behavior.
 The actual migration preflight and cryptographic policy remain unchanged. See
 the [slice-1 evidence](10-acceptance-and-traceability.md#openssl-41-admission-slice-1-2026-10-27)
 and [slice-2 evidence](10-acceptance-and-traceability.md#openssl-41-tooling-slice-2-2026-10-27).
+
+The opt-in [backend transition suite](../test/README.md#openssl-backend-transitions)
+checks selected real 3.x/4.1.x installations on disposable PKIs. Backend switching
+must preserve issuer-scoped serial monotonicity, existing identity material and
+retained generations; switching the executable back does not undo committed
+issuance, revocation or rollover. Verified installation resume must use the saved
+artifacts and retain counters, never sign again. A backend change does not permit
+bypassing pending recovery, removing fences or weakening strict verification.
+Evidence for a tested pair does not qualify all builds, imported policies or
+arbitrary interrupted operations. See the
+[slice-3 results](10-acceptance-and-traceability.md#openssl-41-transitions-slice-3-2026-10-28).

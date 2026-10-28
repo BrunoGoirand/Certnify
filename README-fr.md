@@ -46,6 +46,10 @@ Choisir un autre exécutable avec `OPENSSL=/chemin/absolu/vers/openssl`. L’adm
 de 4.1.x ne constitue pas une qualification complète ; consulter la
 [politique de versions et les limites restantes](specifications/09-compatibility-and-limitations.md#openssl-backend-admission).
 
+La [suite de transition entre backends](test/README.md#openssl-backend-transitions)
+vérifie un couple 3.x/4.1.x choisi : passage à 4.1.x, retour à 3.x et reprise
+vérifiée d’une installation, exclusivement dans des PKI jetables.
+
 L’environnement qualifié est macOS, Bash 3.2.57, GNU Make 3.81 et OpenSSL 3.6.4.
 L’acceptation d’autres versions ne constitue pas leur qualification. Python 3.8+
 est requis à l’exécution pour les barrières de persistance, ainsi que pour les tests ;

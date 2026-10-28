@@ -106,3 +106,4 @@ test/benchmark-durability.py
 test/backend-contract.py
 test/openssl-matrix.py
 test/backend_support.py
+test/backend-transition.py

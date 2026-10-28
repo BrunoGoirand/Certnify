@@ -123,6 +123,45 @@ command. This matrix is a targeted compatibility gate, not the full regression
 suite, a throughput benchmark or qualification of every accepted version/platform.
 See [recorded results and gaps](../specifications/10-acceptance-and-traceability.md#openssl-backend-matrix-2026-10-27).
 
+## OpenSSL backend transitions
+
+The opt-in transition suite requires two explicit, distinct real executables:
+
+```sh
+python3 -B test/backend-transition.py \
+  --openssl3 /absolute/path/to/openssl-3 \
+  --openssl41 /absolute/path/to/openssl-4.1
+```
+
+Missing executables or wrong release families fail; no backend is downloaded and
+no test is silently skipped. The runner records resolved paths, versions, binary
+hashes, platform and Python, then reports two test methods. All source copies use
+the explicit manifest, environments are stripped, and every PKI is disposable.
+Failed commands are reported without exporting captured backend output or recovery
+journals. Python 3.8+ is required.
+Use `--test METHOD` to rerun one of the named methods below; the default runs both.
+
+`test_upgrade_lifecycle_and_switch_back` creates a PKI with 3.x and exercises
+4.1.x reads, issuance, CRL renewal, hold/release, permanent revocation, rollover
+and preserving reissuance. Both backends verify valid and revoked chains with
+strict identity and full CRL checking. Assertions cover per-issuer serials,
+issuer-generation bindings, preserved keys/certificates/history, immutable previews,
+refused permanent-revocation release, and idempotent batch retries. Finally 3.x
+issues and revokes again in the workspace modified by 4.1.x.
+
+`test_verified_resume_across_backend_change_both_directions` injects a failed
+installation after signing, then resumes with the other backend, in both
+directions. It checks pending-operation refusal, preserved index/counters,
+certificate history and bindings, and successful final verification. During resume
+a wrapper refuses `ca`, `req` and `genpkey`, so recovery cannot obtain success by
+reissuing. The injected ordinary failure releases its lock normally; tests never
+remove a stale lock or edit recovery evidence. This is verified installation
+recovery, not abrupt power-loss or network-storage qualification.
+
+This suite tests the selected pair, not every 3.x/4.1.x build or an arbitrary
+production workspace. OpenSSL 1.1.1 preserving migration remains excluded. See
+[the transition evidence](../specifications/10-acceptance-and-traceability.md#openssl-41-transitions-slice-3-2026-10-28).
+
 ## Generated-data convention
 
 Keep authority data in workspace `/root/`, `/intm-*/` (including custom kinds, legacy and rollback names), `/intermediate/`, or `/pki-data/` for explicitly selected custom paths. `/out/`, `/.locks/`, `/.recovery/`, and `/test-results/` are excluded too. Private directories and conventional `.key.pem`/backup filenames are ignored as defense in depth.

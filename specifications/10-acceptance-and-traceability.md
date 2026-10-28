@@ -112,6 +112,83 @@ Full stage-9 coverage, mixed-backend lifecycle and complete platform qualificati
 remain for subsequent slices. No live authority, real power loss or remote
 publication was exercised.
 
+## OpenSSL 4.1 transitions slice 3 (2026-10-28)
+
+The opt-in `test/backend-transition.py` requires explicit 3.x and 4.1.x paths,
+checks actual release families, records resolved identities/hashes and fails if
+a required executable is absent or unsuitable. It is included in the source
+manifest and is separate from numbered single-backend suites.
+
+Its lifecycle scenario creates roots, issuers, RSA/EC leaves and CRLs under 3.x,
+then uses 4.1.x for read-only strict checks, issuance, CRL renewal, hold/release,
+permanent revocation, rollover and preserving reissuance. Both backends check
+valid/revoked results and unchanged read-only snapshots. Assertions cover
+issuer-scoped serial allocation, generation bindings, old key/certificate hashes,
+retained history, subject/SAN preservation, key rotation, preview immutability and
+idempotent retries. Finally 3.x issues/revokes again after the 4.1.x transitions.
+
+The second scenario injects an ordinary installation failure after signing and
+resumes the sealed plan using the other backend, in both directions. Pending
+work blocks new issuance without mutation. Resume retains counters, index,
+certificate history and bindings, and a wrapper refuses `ca`, `req` and `genpkey`
+during resume. No stale lock is removed or recovery evidence rewritten. This
+qualifies the tested ordinary failure/resume path, not abrupt process death,
+power loss or arbitrary damaged journals across a backend switch.
+
+Selected environment: macOS 26.7.1 x86_64, Bash 3.2.57, GNU Make 3.81 and
+Python 3.15.2. Resolved executables:
+
+| Backend | Resolved path | Binary SHA-256 |
+| --- | --- | --- |
+| OpenSSL 3.5.9 | `/usr/local/Cellar/openssl@3/3.5.9/bin/openssl` | `dc503bb34895694f86043c7818209176c5d5279a3202e288f979da06df03ec32` |
+| OpenSSL 4.1.0 | `/usr/local/Cellar/openssl@4/4.1.0/bin/openssl` | `ba60e673f9c8487e653afa4f6690d52baeab61c2443c708bc9f11f8a72628561` |
+
+The first transition-test attempt omitted mandatory `VERIFY_PURPOSE=sslserver`
+from strict verification. All three exercised paths failed on that test invocation
+error (including the final verification of each resume), not an observed backend
+incompatibility. The invocation was corrected without changing runtime policy.
+The next run passed both resume directions but the lifecycle test assumed a
+canonical filename after preserving reissuance. That mode deliberately installs
+serial-prefixed artifacts. The test now compares the committed `newcerts` entries
+and public keys, and its lifecycle method is rerun separately. No runtime parser,
+verification or persistence change was needed for either test correction.
+
+Executed from the repository root:
+
+- `OPENSSL=/usr/local/bin/openssl make test-stage9`: complete suite, 8/8 passed
+  (five real migration methods and three tool-orchestration methods). This covers
+  RSA/EdDSA profile variants, UTF-8/extended subjects, critical/absent SANs,
+  copy-capability failures, missing metadata, stale inventory, policy drift,
+  immutable previews and retries.
+- `python3 -B test/openssl-matrix.py --backend /usr/local/bin/openssl > /tmp/certnify-openssl4-slice3-matrix.jsonl`:
+  exit 0, all seven selected methods passed, no `not_applicable` record and zero
+  summary failures. Its migration method overlaps stage 9 and is not an additional
+  distinct scenario. The portable CRL method also covers corrupted signatures,
+  wrong issuers, invalid/missing CRLs and validity boundaries without mutation.
+- `OPENSSL=/usr/local/bin/openssl make test-stage0`: 5/5 passed, including packaging
+  the new opt-in test and excluding operational data.
+- `python3 -B test/backend-transition.py --openssl3 /usr/local/opt/openssl@3/bin/openssl --openssl41 /usr/local/bin/openssl > /tmp/certnify-openssl4-slice3-transition.log 2>&1`:
+  after the strict-purpose correction, `test_verified_resume_across_backend_change_both_directions`
+  passed in both directions. This run returned 1 because of the lifecycle test's
+  filename assumption described above; it is not reported as a complete suite pass.
+- `python3 -B test/backend-transition.py --openssl3 /usr/local/opt/openssl@3/bin/openssl --openssl41 /usr/local/bin/openssl --test test_upgrade_lifecycle_and_switch_back > /tmp/certnify-openssl4-slice3-lifecycle.log 2>&1`:
+  exit 0 after the artifact-selection correction. The complete lifecycle,
+  including new issuance and revocation after switching back to 3.5.9, passed.
+  The two distinct transition methods therefore have final passing results from
+  incremental validation; the unchanged resume method was not rerun after the
+  lifecycle-only correction. The `/tmp` logs are ephemeral local evidence.
+- Supplying `/usr/local/bin/openssl` to both `--openssl3` and `--openssl41`:
+  expected exit 2 for wrong release family, before PKI creation.
+- Python 3.8 grammar, local documentation targets and `git diff --check`: passed.
+
+No production PKI or external publication service was used. Evidence is scoped
+to the selected pair and disposable policies; admission of a release family does
+not qualify every patch/build. OpenSSL 1.1.1 preserving migration remains excluded.
+The complete stages 0–14/smoke and broader platform acceptance remain slice 4.
+No additional runtime parsing or verification incompatibility was demonstrated
+by these completed checks, so this slice adds regression/qualification coverage
+without weakening or changing cryptographic policy.
+
 ## Executable gates
 
 The exclusive-writer requirement in chapter 01 also needs deployment acceptance:
