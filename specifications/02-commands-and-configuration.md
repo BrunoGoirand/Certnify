@@ -236,3 +236,11 @@ the operation blocked for review. An interrupted operation may leave
 `.recovery/power-loss`, including when no issuance journal exists; report, verified
 resume and explicit acknowledgment retain the existing `RECOVERY_ACTION` interface.
 See chapter 08 and the recovery guides for admission and qualification limits.
+
+## Source maintenance
+
+`make version` prints the toolkit VERSION. `make version-bump LEVEL=patch|minor|major`
+explicitly increments it without PKI bootstrap, OpenSSL or Git. LEVEL has no
+default; empty and unsupported values fail. These are source maintenance commands,
+not PKI operations. See [chapter 11](11-versioning-and-releases.md) for the exact
+version, changelog and archive contracts.

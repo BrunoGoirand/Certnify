@@ -37,3 +37,6 @@ draft/
 
 # Interrupted-operation journals and manual recovery reviews.
 /.recovery/
+
+# Source version maintenance lock (never remove while an increment is running).
+/.version-bump.lock/

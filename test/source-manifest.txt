@@ -107,3 +107,10 @@ test/backend-contract.py
 test/openssl-matrix.py
 test/backend_support.py
 test/backend-transition.py
+
+VERSION
+CHANGELOG.md
+tools/version.py
+test/versioning.py
+specifications/11-versioning-and-releases.md
+specifications/guides/versioning-fr.md

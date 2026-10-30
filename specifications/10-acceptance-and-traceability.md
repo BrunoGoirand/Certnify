@@ -5,6 +5,25 @@ Use disposable source-only workspaces and newly generated keys. Capture current
 time around issuance for lifetime checks. Python 3.8+ is also a runtime dependency
 of the durability helper. See [test/README.md](../test/README.md) for execution and packaging.
 
+## Versioning and source packaging validation (2026-10-30)
+
+The separate `make test-versioning` gate covers the source-maintenance contract
+in [chapter 11](11-versioning-and-releases.md). Its seven disposable-fixture
+methods check Make/direct version parity, increment/reset rules, strict VERSION
+format, literal and rejected LEVEL values, preserved source state and modes,
+existing locks, replacement failure cleanup, exact archive membership, archive
+extraction without Git, invalid manifests/symlinks, exclusive destinations and
+archive-write failure cleanup. No operational PKI is used.
+
+`make test-versioning` passed 7/7 methods and
+`OPENSSL=/usr/local/bin/openssl make test-stage0` passed 5/5 methods on macOS,
+Python 3.15.2, GNU Make 3.81, Bash 3.2.57 and OpenSSL 4.1.0.
+`OPENSSL=/usr/local/bin/openssl make test-smoke` also passed in disposable PKIs.
+`make help`, `make version`, local documentation link targets, Python 3.8 grammar
+parsing for the three affected Python files and `git diff --check` also passed.
+Python 3.8 grammar parsing is not execution on Python 3.8. This targeted evidence
+does not rerun or extend the full stages 0–14 historical platform qualification.
+
 ## OpenSSL 4.1 qualification slice 4 (2026-10-28)
 
 The release qualification uses the source baseline

@@ -16,6 +16,15 @@ de signature documentaire ou de service d’horodatage.
 
 [Licence MIT](LICENSE.txt) · © 2025–2026 Bruno Goirand
 
+## Version du toolkit et archives sources
+
+`make version` lit `VERSION`. La maintenance explicite utilise
+`make version-bump LEVEL=patch|minor|major` et modifie uniquement VERSION, sans
+mutation Git ou PKI ni dépendance à OpenSSL. Tenir [CHANGELOG.md](CHANGELOG.md) à jour manuellement.
+Créer une archive avec `python3 -B test/workspace.py archive . /tmp/certnify-1.0.0.tar.gz`
+en choisissant un nouveau nom correspondant à la version actuelle. Seul le manifeste
+source explicite est inclus. Voir le [guide de versionnement et de préparation manuelle](specifications/guides/versioning-fr.md).
+
 ## Fonctionnalités et périmètre
 
 - Clés RSA, EC sur courbes nommées, Ed25519 et Ed448 ; profils adaptés à la clé réelle.

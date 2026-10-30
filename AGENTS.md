@@ -103,13 +103,17 @@ power-loss, network-filesystem or remote-publication qualification.
 
 ## Code navigation with Serena
 
-Prefer the local Serena MCP server for code exploration.
-Read its initial instructions before the first coding task and verify
-that the active project matches this repository.
-Use symbol overviews, targeted symbol reads and reference searches
-before reading entire source files.
-Use text search for documentation, configuration and unsupported files.
-If Serena is unavailable, state that briefly and use local tools.
+When Serena is available, initialize it at the start of the coding session,
+read its initial instructions, and verify that the active project is this
+repository.
+
+Use Serena for supported code navigation, symbol inspection and reference
+searches before using broad file reads. Use local tools for documentation,
+unsupported files, command execution and tests.
+
+If Serena is unavailable or initialization fails, report the error and use
+local tools to continue the task. Serena must not be a prerequisite for
+starting Codex or repairing its local configuration.
 
 ## Test Commands
 

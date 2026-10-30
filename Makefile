@@ -88,7 +88,7 @@
 
 SHELL := /bin/bash
 
-# --- Aide ---
+# --- Help ---
 .PHONY: help
 help:
 	@echo 'PKI Toolkit — commandes disponibles:'
@@ -107,6 +107,9 @@ help:
 	@echo '  -- Vérification & Révocation:'
 	@echo '  make verify KIND=web FILE=".../cert.crt" [VERIFY_CRL=0|1] [VERIFY_MODE=normal|tolerate_revoked|info|strict]'
 	@echo '  make revoke KIND=web FILE=".../cert.crt" (ou variables acceptées par revoke-leaf.sh)'
+	@echo '  make version'
+	@echo '  make version-bump LEVEL=patch|minor|major'
+	@echo '  make test-versioning'
 	@echo '  make test-smoke'
 	@echo '  make clean [CLEAN_APPLY=1] (preview by default; apply deletes keys/history)'
 	@echo '  make verify KIND=web CN="..." VERIFY_MODE=strict VERIFY_DNS="..." VERIFY_PURPOSE=sslserver'
@@ -709,3 +712,17 @@ test-stage13:
 .PHONY: test-stage14
 test-stage14:
 	python3 -B test/stage14.py
+
+# Source maintenance is independent of OpenSSL and operational PKI locking.
+override LEVEL := $(value LEVEL)
+export LEVEL
+.PHONY: version version-bump
+version:
+	@python3 -B tools/version.py show
+
+version-bump:
+	@python3 -B tools/version.py bump
+
+.PHONY: test-versioning
+test-versioning:
+	python3 -B test/versioning.py

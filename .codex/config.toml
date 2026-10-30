@@ -1,0 +1,4 @@
+[mcp_servers.serena]
+enabled = true
+# A missing local Serena installation must not prevent Codex from starting.
+required = false

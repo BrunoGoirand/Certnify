@@ -358,3 +358,14 @@ hardware power loss and Linux are not qualified by these tests.
 selection, stdout and file output, explicit authority selection, legacy issuer
 resolution after rollover and replacement of an existing output file. It uses
 disposable PKIs and generated keys.
+
+## Versioning and source archive gate
+
+Run `make test-versioning` (or `python3 -B test/versioning.py`) for source-only
+maintenance. Seven methods check Make/direct parity, version parsing, literal
+LEVEL handling, preserved files and permissions, existing locks, replacement
+failure cleanup, exact archive membership, extraction without Git, invalid
+manifests/symlinks, exclusive destinations and archive failure cleanup.
+All mutations use manifest-only disposable fixtures; no OpenSSL is required.
+Stage 0 remains the shared packaging and real root-generation gate.
+See [chapter 11](../specifications/11-versioning-and-releases.md) for archive usage.

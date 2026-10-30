@@ -20,6 +20,7 @@ No separate correction plan or historical audit is needed to interpret the rules
 | [08 — Architecture and reliability](08-architecture-and-reliability.md) | Component boundaries, locking, commits and recovery |
 | [09 — Compatibility and limitations](09-compatibility-and-limitations.md) | Import requirements, deliberate restrictions and qualification limits |
 | [10 — Acceptance and traceability](10-acceptance-and-traceability.md) | Acceptance scenarios, executable tests and implementation mapping |
+| [11 — Versioning and releases](11-versioning-and-releases.md) | Toolkit version, manual changelog and manifest-only source archives |
 | [Guides](guides/README.md) | English/French usage and recovery procedures |
 
 ## How to use this specification

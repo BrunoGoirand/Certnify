@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Source-only test workspaces and state snapshots (Python 3.8+, test-only)."""
+"""Manifest-only source packages, test workspaces and fixture snapshots (Python 3.8+)."""
 import argparse
 import hashlib
 import json
@@ -8,11 +8,14 @@ import re
 import shutil
 import ssl
 import stat
+import tarfile
 from pathlib import Path, PurePosixPath
 
 
 def source_paths(source):
     manifest = source / 'test/source-manifest.txt'
+    if (source / 'test').is_symlink() or not stat.S_ISREG(manifest.lstat().st_mode):
+        raise ValueError('Manifest must be a regular file without symlink parents')
     paths = []
     for line in manifest.read_text().splitlines():
         if not line or line.startswith('#'):
@@ -47,6 +50,22 @@ def copy_sources(source, destination):
         target = destination / name
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         shutil.copy2(source / name, target)
+
+
+def archive_sources(source, destination):
+    source = Path(source).resolve()
+    destination = Path(destination)
+    paths = source_paths(source)
+    # Exclusive creation also refuses dangling destination symlinks.
+    with destination.open('xb') as output:
+        try:
+            with tarfile.open(fileobj=output, mode='w:gz') as archive:
+                for name in paths:
+                    archive.add(source / name, arcname='certnify/' + name, recursive=False)
+            output.flush()
+        except BaseException:
+            destination.unlink()
+            raise
 
 
 def snapshot(root):
@@ -84,12 +103,14 @@ def snapshot(root):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('operation', choices=['copy', 'snapshot', 'diff'])
+    parser.add_argument('operation', choices=['copy', 'archive', 'snapshot', 'diff'])
     parser.add_argument('source', type=Path)
     parser.add_argument('destination', type=Path)
     args = parser.parse_args()
     if args.operation == 'copy':
         copy_sources(args.source, args.destination)
+    elif args.operation == 'archive':
+        archive_sources(args.source, args.destination)
     elif args.operation == 'snapshot':
         args.destination.write_text(json.dumps(snapshot(args.source), indent=2, sort_keys=True) + '\n')
         args.destination.chmod(0o600)

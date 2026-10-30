@@ -14,6 +14,15 @@ credentials; it does not itself serve TLS, sign documents or run a timestamp ser
 
 [MIT license](LICENSE.txt) · © 2025–2026 Bruno Goirand
 
+## Toolkit version and source archives
+
+`make version` reads `VERSION`. Explicit source maintenance uses
+`make version-bump LEVEL=patch|minor|major`; it changes only VERSION, without Git,
+OpenSSL or PKI mutations. Maintain [CHANGELOG.md](CHANGELOG.md) manually.
+Create source archives with `python3 -B test/workspace.py archive . /tmp/certnify-1.0.0.tar.gz`
+using a fresh filename matching the current version. Only the explicit source
+manifest is packaged. See the [versioning contract and manual release procedure](specifications/11-versioning-and-releases.md).
+
 ## Capabilities and scope
 
 - RSA, named-curve EC, Ed25519 and Ed448 keys; profiles selected against the actual key.
