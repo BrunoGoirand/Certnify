@@ -46,8 +46,8 @@ relocate_workspace() (
       -CAfile "$ROOT_DIR/root/certs/ca.cert.pem" "$base/certs/ca.cert.pem" >/dev/null
     count=$((count+1))
     PKI_CONFIG_BASE="$old/$relative" PKI_CONFIG_NEW="$base" LC_ALL=C \
-      awk -f "$ROOT_DIR/bin/pki-config.awk" "$config" > "$stage/$count.cnf"
-    PKI_CONFIG_BASE="$base" LC_ALL=C awk -f "$ROOT_DIR/bin/pki-config.awk" "$stage/$count.cnf" >/dev/null
+      awk -f "$CERTNIFY_SOURCE_DIR/bin/pki-config.awk" "$config" > "$stage/$count.cnf"
+    PKI_CONFIG_BASE="$base" LC_ALL=C awk -f "$CERTNIFY_SOURCE_DIR/bin/pki-config.awk" "$stage/$count.cnf" >/dev/null
     validate_policy_config "$stage/$count.cnf" "$base"
     configs+=("$config")
     printf '[RELOCATE] %s -> %s\n' "$old/$relative" "$base"

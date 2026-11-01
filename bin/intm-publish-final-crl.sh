@@ -8,7 +8,7 @@ for flag in "$FINAL_MODE" "$ALLOW_REMAINING_LEAFS" "$DRY_RUN"; do
   [[ "$flag" == 0 || "$flag" == 1 ]] || die "Final CRL flags must be 0 or 1"
 done
 if [[ -n "${PUBLISH_CMD:-}${PUBLISH_FETCH_CMD:-}" ]]; then
-  python3 -B "$ROOT_DIR/bin/pki-publish.py" check || die "Invalid publication configuration"
+  python3 -B "$CERTNIFY_SOURCE_DIR/bin/pki-publish.py" check || die "Invalid publication configuration"
 fi
 pki_plan_or_begin
 if [[ -z "${INT_DIR:-}" ]]; then INT_DIR="intm-${KIND:?INT_DIR or KIND required}-ca"; fi
@@ -92,7 +92,7 @@ if [[ -n "${PUBLISH_CMD:-}" ]]; then
   for output in "$CRL_PEM" "$CRL_DER" "$CRL_PEM.sha256" "$CRL_DER.sha256" "$LATEST_PEM" "$LATEST_DER"; do
     artifacts+=("$(basename "$output")")
   done
-  if ! python3 -B "$ROOT_DIR/bin/pki-publish.py" "${artifacts[@]}" | tee -a "$report"; then
+  if ! python3 -B "$CERTNIFY_SOURCE_DIR/bin/pki-publish.py" "${artifacts[@]}" | tee -a "$report"; then
     warn "Local CRL committed; remote publication failed or unverified. Resume with INT_DIR=$INT_DIR FINAL_CRL=$CRL_PEM and the same OUT_DIR/PUBLISH_CMD/PUBLISH_FETCH_CMD. Receipt: $report"
     exit 1
   fi

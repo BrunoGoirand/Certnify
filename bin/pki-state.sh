@@ -7,7 +7,11 @@
 pki_begin() {
   local access="${1:-write}"
   case "$access" in read|write) ;; *) die "Invalid transaction access mode: $access" ;; esac
+  local selected
+  selected="$(python3 -B "$CERTNIFY_SOURCE_DIR/bin/pki-workspace.py" --path)" || die "Workspace admission failed"
+  [[ "$selected" == "$ROOT_DIR" ]] || die "Workspace selection changed"
   cd "$ROOT_DIR"
+  [[ "$(pwd -P)" == "$ROOT_DIR" ]] || die "Workspace physical identity changed"
   acquire_lock root-ca
   trap 'pki_exit "$?"' EXIT
   recovery_guard
@@ -45,7 +49,7 @@ workspace_path() {
     notes|notes/*|draft|draft/*|image|image/*|.vscode|.vscode/*)
       die "Reserved ancillary path cannot hold PKI state: $resolved" ;;
   esac
-  if grep -Fxq -- "${resolved#"$ROOT_DIR/"}" "$ROOT_DIR/test/source-manifest.txt"; then
+  if grep -Fxq -- "${resolved#"$ROOT_DIR/"}" "$CERTNIFY_SOURCE_DIR/test/source-manifest.txt"; then
     die "Distribution source cannot be used as operational PKI state: $resolved"
   fi
   printf '%s\n' "$resolved"
@@ -149,7 +153,7 @@ check_config() {
   open_authority_state "$base"
   [[ "$base" == "$ROOT_DIR/root" || -d "$base/csr" ]] || die "Incomplete authority: missing $base/csr"
   [[ -f "$cnf" ]] || die "Missing configuration: $cnf"
-  PKI_CONFIG_BASE="$base" LC_ALL=C awk -f "$ROOT_DIR/bin/pki-config.awk" "$cnf" >/dev/null
+  PKI_CONFIG_BASE="$base" LC_ALL=C awk -f "$CERTNIFY_SOURCE_DIR/bin/pki-config.awk" "$cnf" >/dev/null
   validate_policy_config "$cnf" "$base"
 }
 
@@ -218,7 +222,7 @@ rebind_config() {
   [[ "$base" == /* ]] || base="$ROOT_DIR/$base"
   check_authority_paths "$base"
   tmp="$(mktemp "$base/openssl.cnf.rebind.XXXXXX")"
-  if ! PKI_CONFIG_BASE="$old" PKI_CONFIG_NEW="$base" LC_ALL=C awk -f "$ROOT_DIR/bin/pki-config.awk" "$base/openssl.cnf" > "$tmp"; then
+  if ! PKI_CONFIG_BASE="$old" PKI_CONFIG_NEW="$base" LC_ALL=C awk -f "$CERTNIFY_SOURCE_DIR/bin/pki-config.awk" "$base/openssl.cnf" > "$tmp"; then
     rm -f "$tmp"; die "Cannot rebind configuration: $base"
   fi
   mv "$tmp" "$base/openssl.cnf"

@@ -369,3 +369,11 @@ manifests/symlinks, exclusive destinations and archive failure cleanup.
 All mutations use manifest-only disposable fixtures; no OpenSSL is required.
 Stage 0 remains the shared packaging and real root-generation gate.
 See [chapter 11](../specifications/11-versioning-and-releases.md) for archive usage.
+
+## Named PKI regression
+
+`make test-named-pki` tests read-only resolution, normalization and invalid
+selectors, mixed-layout refusal, two isolated PKIs, revocation, peer guards,
+script/Make selection, exports, cleanup and cross-root trust rejection using
+manifest-only disposable fixtures. Run existing stages as well when changing
+shared source/state path resolution; this test is not a full-suite substitute.

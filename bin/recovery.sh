@@ -14,7 +14,7 @@ case "${RECOVERY_ACTION:-report}" in
     if [[ -e .recovery/pending ]]; then recovery_resume; else recovery_report; durability_guard; fi
     ;;
   relocate)
-    source "$ROOT_DIR/bin/pki-relocate.sh"
+    source "$CERTNIFY_SOURCE_DIR/bin/pki-relocate.sh"
     relocate_workspace
     ;;
   acknowledge)
@@ -40,7 +40,7 @@ case "${RECOVERY_ACTION:-report}" in
     if [[ -e .recovery/pending ]]; then
       printf '%s\n' "$RECOVERY_NOTE" > .recovery/pending/review
     fi
-    python3 -B "$ROOT_DIR/bin/pki-durable.py" acknowledge "$ROOT_DIR" "$RECOVERY_ID" "$RECOVERY_NOTE"
+    python3 -B "$CERTNIFY_SOURCE_DIR/bin/pki-durable.py" acknowledge "$ROOT_DIR" "$RECOVERY_ID" "$RECOVERY_NOTE"
     PKI_DURABLE_OWNED=""
     if [[ ! -e .recovery/pending ]]; then
       info "Power-loss review recorded; no PKI repair or reissuance performed."

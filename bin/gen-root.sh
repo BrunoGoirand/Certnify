@@ -58,8 +58,8 @@
 # OPENSSL               Path to the OpenSSL binary (default: openssl)
 #
 # === File Layout ===
-# ROOT_DIR              Working directory for the root CA (default: current ./root)
-# ROOT_CNF              Path to the root’s OpenSSL configuration (default: ROOT_DIR/root/openssl.cnf)
+# PKI                   Named workspace selector (certnify-<slug>); omit for legacy layout
+# ROOT_CNF              Configuration within the selected workspace (default: root/openssl.cnf)
 #
 # === Behavior & Safety Rules ===
 # - If an existing root certificate is found:
@@ -99,6 +99,11 @@
 set -euo pipefail
 # shellcheck source=bin/pki-env.sh
 source "$(dirname "$0")/pki-env.sh"
+# Only root creation may establish a new named workspace. Exclusive mkdir
+# refuses a concurrent creator; failures retain partial state for inspection.
+if [[ -n "${PKI:-}" && ! -e "$ROOT_DIR" ]]; then
+  mkdir -m 700 "$ROOT_DIR" || die "Cannot create named PKI workspace"
+fi
 pki_begin
 
 REQ_CNF=""

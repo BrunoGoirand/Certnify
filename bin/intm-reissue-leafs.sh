@@ -156,11 +156,11 @@ fi
 
 # Built-in commands receive row values as environment data, never shell source.
 case "$KIND" in
-  web) ISSUE_SCRIPT=bin/gen-server.sh; DEFAULT_DAYS=397 ;;
-  auth|user) ISSUE_SCRIPT=bin/gen-user.sh; DEFAULT_DAYS=825 ;;
-  smime) ISSUE_SCRIPT=bin/gen-email.sh; DEFAULT_DAYS=730 ;;
-  code) ISSUE_SCRIPT=bin/gen-code.sh; DEFAULT_DAYS=730 ;;
-  archive|archives) ISSUE_SCRIPT=bin/gen-archive.sh; DEFAULT_DAYS=3600 ;;
+  web) ISSUE_SCRIPT="$CERTNIFY_SOURCE_DIR/bin/gen-server.sh"; DEFAULT_DAYS=397 ;;
+  auth|user) ISSUE_SCRIPT="$CERTNIFY_SOURCE_DIR/bin/gen-user.sh"; DEFAULT_DAYS=825 ;;
+  smime) ISSUE_SCRIPT="$CERTNIFY_SOURCE_DIR/bin/gen-email.sh"; DEFAULT_DAYS=730 ;;
+  code) ISSUE_SCRIPT="$CERTNIFY_SOURCE_DIR/bin/gen-code.sh"; DEFAULT_DAYS=730 ;;
+  archive|archives) ISSUE_SCRIPT="$CERTNIFY_SOURCE_DIR/bin/gen-archive.sh"; DEFAULT_DAYS=3600 ;;
   *) [[ -n "${ISSUE_CMD:-}" ]] || die "Unknown KIND: $KIND" ;;
 esac
 case "${ISSUE_CMD:-}" in
@@ -176,7 +176,7 @@ elif [[ "$REISSUE_MODE" == cn-only ]]; then
   warn "Reissuance mode: legacy CN-only; original subject, SANs, extensions and key policy are not preserved."
 else
   [[ -n "${LEGACY_DIR:-}" ]] || die "Preserving migration requires LEGACY_DIR (selected automatically after rollover)"
-  source "$ROOT_DIR/bin/pki-migration.sh"
+  source "$CERTNIFY_SOURCE_DIR/bin/pki-migration.sh"
   info "Reissuance mode: preserve subject, SANs, profile and key parameters; generate fresh private keys."
 fi
 

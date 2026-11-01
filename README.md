@@ -468,3 +468,5 @@ No duration is silently capped. Existing certificates and keys are not migrated.
 - [Profile selection guide](specifications/guides/profiles-en.md)
 - [Recovery procedures](specifications/guides/recovery-en.md)
 - [Compatibility and supported limits](specifications/09-compatibility-and-limitations.md)
+
+[Named PKI workspaces](specifications/12-named-pki.md)

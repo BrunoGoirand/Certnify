@@ -4,7 +4,7 @@ set -euo pipefail
 source "$(dirname "$0")/pki-env.sh"
 operation="${1:-generate}"
 if [[ "$operation" == clean ]]; then
-  source "$ROOT_DIR/bin/pki-clean.sh"
+  source "$CERTNIFY_SOURCE_DIR/bin/pki-clean.sh"
   clean_workspace
   exit 0
 fi
@@ -14,7 +14,7 @@ case "$operation" in
 esac
 if [[ "${CRL_HISTORY:-0}" == 1 ]]; then
   [[ "$operation" == all || "$operation" == generate ]] || die "CRL_HISTORY=1 requires crl or crl-all"
-  source "$ROOT_DIR/bin/pki-crl-history.sh"
+  source "$CERTNIFY_SOURCE_DIR/bin/pki-crl-history.sh"
   renew_historical_crls
   exit 0
 fi

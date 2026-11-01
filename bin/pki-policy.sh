@@ -262,10 +262,10 @@ prepare_sans() {
   if [[ -z "$SAN_DNS$SAN_IP$SAN_EMAIL$SAN_URI" ]]; then
     case "${ACTION:-}" in server) SAN_DNS="$CN" ;; user|email) [[ "$CN" != *@* ]] || SAN_EMAIL="$CN" ;; esac
   fi
-  SAN_DNS="$(PKI_SAN_TYPE=DNS PKI_SAN_VALUES="$SAN_DNS" LC_ALL=C awk -f "$ROOT_DIR/bin/pki-san.awk")"
-  SAN_IP="$(PKI_SAN_TYPE=IP PKI_SAN_VALUES="$SAN_IP" LC_ALL=C awk -f "$ROOT_DIR/bin/pki-san.awk")"
-  SAN_EMAIL="$(PKI_SAN_TYPE=EMAIL PKI_SAN_VALUES="$SAN_EMAIL" LC_ALL=C awk -f "$ROOT_DIR/bin/pki-san.awk")"
-  SAN_URI="$(PKI_SAN_TYPE=URI PKI_SAN_VALUES="$SAN_URI" LC_ALL=C awk -f "$ROOT_DIR/bin/pki-san.awk")"
+  SAN_DNS="$(PKI_SAN_TYPE=DNS PKI_SAN_VALUES="$SAN_DNS" LC_ALL=C awk -f "$CERTNIFY_SOURCE_DIR/bin/pki-san.awk")"
+  SAN_IP="$(PKI_SAN_TYPE=IP PKI_SAN_VALUES="$SAN_IP" LC_ALL=C awk -f "$CERTNIFY_SOURCE_DIR/bin/pki-san.awk")"
+  SAN_EMAIL="$(PKI_SAN_TYPE=EMAIL PKI_SAN_VALUES="$SAN_EMAIL" LC_ALL=C awk -f "$CERTNIFY_SOURCE_DIR/bin/pki-san.awk")"
+  SAN_URI="$(PKI_SAN_TYPE=URI PKI_SAN_VALUES="$SAN_URI" LC_ALL=C awk -f "$CERTNIFY_SOURCE_DIR/bin/pki-san.awk")"
 }
 
 claim_leaf_name() {
@@ -293,7 +293,7 @@ san_names() {
     LC_ALL=C "$OPENSSL" x509 -in "$file" -noout -ext subjectAltName
   else
     LC_ALL=C "$OPENSSL" req -in "$file" -noout -text
-  fi | LC_ALL=C awk -f "$ROOT_DIR/bin/pki-san-output.awk" | LC_ALL=C sort -u
+  fi | LC_ALL=C awk -f "$CERTNIFY_SOURCE_DIR/bin/pki-san-output.awk" | LC_ALL=C sort -u
 }
 
 # Compile request/profile SANs before any CA mutation, using a disposable key.

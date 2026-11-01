@@ -48,7 +48,7 @@ recovery_plan_guard() {
 
 recovery_plan_deadline() {
   local stamp
-  stamp="$(LC_ALL=C awk -f "$ROOT_DIR/bin/pki-time.awk")"
+  stamp="$(LC_ALL=C awk -f "$CERTNIFY_SOURCE_DIR/bin/pki-time.awk")"
   stamp="${stamp%%$'\t'*}"
   [[ "$stamp" =~ ^[0-9]+$ ]] || die "Invalid recovery validity deadline"
   printf '@valid-until\t%s\n' "$stamp" >> "$ROOT_DIR/.recovery/pending/guards"

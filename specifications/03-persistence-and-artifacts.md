@@ -1,5 +1,11 @@
 # 03 — Persistence and artifacts
 
+In named mode, the operational `workspace/` below is the selected
+`<installation>/certnify-<slug>/`. Sources and profile templates remain in the
+installation base. Locks, recovery, exports and all CA data are per workspace.
+See [named PKI workspaces](12-named-pki.md). The historical direct layout remains
+available under the documented legacy admission rules.
+
 ## Workspace layout
 
 ```text

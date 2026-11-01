@@ -246,7 +246,7 @@ check_config root
 
 MIGRATION_CA_ARGS=()
 if [[ -n "${CERTNIFY_MIGRATION_SOURCE:-}" ]]; then
-  source "$ROOT_DIR/bin/pki-migration.sh"
+  source "$CERTNIFY_SOURCE_DIR/bin/pki-migration.sh"
   migration_load "$CERTNIFY_MIGRATION_SOURCE" "${SERIAL:?}" "$CN" "${EXPIRES:?}"
   migration_preflight "$INT_DIR"
   MIGRATION_CA_ARGS=(-preserveDN)

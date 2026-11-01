@@ -80,7 +80,7 @@ for identity_type_candidate in DNS IP EMAIL URI; do
   value="${!variable-}"
   [[ -n "$value" ]] || continue
   [[ "$value" != *,* && "$value" != *'*'* ]] || die "$variable expects one literal identity"
-  normalized="$(PKI_SAN_TYPE="$identity_type_candidate" PKI_SAN_VALUES="$value" LC_ALL=C awk -f "$ROOT_DIR/bin/pki-san.awk")"
+  normalized="$(PKI_SAN_TYPE="$identity_type_candidate" PKI_SAN_VALUES="$value" LC_ALL=C awk -f "$CERTNIFY_SOURCE_DIR/bin/pki-san.awk")"
   [[ "$normalized" == "$value" ]] || die "$variable must be a single normalized identity"
   identity_count=$((identity_count+1)); identity_type="$identity_type_candidate"; identity_value="$value"
 done
@@ -92,7 +92,7 @@ fi
 verification_time=''
 if [[ -n "${VERIFY_ATTIME:-}" ]]; then
   [[ "$VERIFY_ATTIME" =~ ^(0|[1-9][0-9]{0,11})$ ]] || die "VERIFY_ATTIME expects nonnegative Unix seconds (at most 12 digits)"
-  verification_time="$(PKI_TIME_MODE=encode PKI_TIME_VALUE="$VERIFY_ATTIME" LC_ALL=C awk -f "$ROOT_DIR/bin/pki-time.awk")" || die "Cannot convert VERIFY_ATTIME"
+  verification_time="$(PKI_TIME_MODE=encode PKI_TIME_VALUE="$VERIFY_ATTIME" LC_ALL=C awk -f "$CERTNIFY_SOURCE_DIR/bin/pki-time.awk")" || die "Cannot convert VERIFY_ATTIME"
   verification_time="${verification_time%Z}"
 fi
 case "${VERIFY_PURPOSE:-}" in

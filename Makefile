@@ -92,6 +92,7 @@ SHELL := /bin/bash
 .PHONY: help
 help:
 	@echo 'PKI Toolkit — commandes disponibles:'
+	@echo '  PKI=certnify-<name> selects an isolated workspace; pki-name CN=... derives a name; pki-info reports JSON paths.'
 	@echo '  make root CN="Root CA" [DAYS=7300]'
 	@echo '  make intermediate KIND=web CN="Web Issuing CA" [DAYS=3650]'
 	@echo '  make int-web|int-auth|int-code|int-smime|int-archive [CN="..."]'
@@ -187,6 +188,12 @@ override CHAIN := $(value CHAIN)
 export CHAIN
 override INT_CN := $(value INT_CN)
 export INT_CN
+# Preserve omitted versus explicitly empty selectors, without recipe expansion.
+ifneq ($(origin PKI),undefined)
+override PKI := $(value PKI)
+export PKI
+endif
+
 override INT_DIR := $(value INT_DIR)
 export INT_DIR
 override KIND := $(value KIND)
@@ -726,3 +733,15 @@ version-bump:
 .PHONY: test-versioning
 test-versioning:
 	python3 -B test/versioning.py
+
+# Read-only naming; CN is exported as literal data by the public adapter.
+.PHONY: pki-name
+pki-name:
+	@python3 -B bin/pki-workspace.py
+
+.PHONY: pki-info test-named-pki
+pki-info:
+	@python3 -B bin/pki-workspace.py --info
+
+test-named-pki:
+	@python3 -B test/named-pki.py -v

@@ -42,7 +42,7 @@ migration_load() {
   subject="${subject#subject=}"
   printf 'V\t%s\t\t%s\tunknown\t%s\n' "$(printf '%s' "$expiry" | tr -d '\055:T')" "$serial" "$subject" | \
     CN="$cn" PKI_RECORD_SERIAL="$serial" PKI_REQUIRE_CN=1 pki_records serial-target - >/dev/null
-  cert_expiry="$(LC_ALL=C "$OPENSSL" x509 -in "$MIGRATION_CERT" -noout -enddate | LC_ALL=C awk -f "$ROOT_DIR/bin/pki-time.awk" | cut -f2)"
+  cert_expiry="$(LC_ALL=C "$OPENSSL" x509 -in "$MIGRATION_CERT" -noout -enddate | LC_ALL=C awk -f "$CERTNIFY_SOURCE_DIR/bin/pki-time.awk" | cut -f2)"
   [[ "$cert_expiry" == "$expiry" ]] || die "Certificate/inventory expiry mismatch: $MIGRATION_CERT"
   resolve_leaf_issuer "$base" "$MIGRATION_CERT"
   [[ -z "${CERTNIFY_SOURCE_ID:-}" || "$(certificate_id "$MIGRATION_CERT")" == "$CERTNIFY_SOURCE_ID" ]] || die "Source certificate changed after batch planning"

@@ -40,3 +40,5 @@ Validation results qualify only the platform and scenarios listed in chapter 10.
 A future implementation must not turn a partial failure into an implicit retry or
 assume an untested behavior is guaranteed. Profile fragments in `../profiles/`
 and regression fixtures supply executable policy and acceptance evidence.
+
+[12 — Named PKI workspaces](12-named-pki.md) — shared sources and isolated authority state.

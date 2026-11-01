@@ -114,3 +114,9 @@ tools/version.py
 test/versioning.py
 specifications/11-versioning-and-releases.md
 specifications/guides/versioning-fr.md
+
+capabilities.json
+test/named-pki.py
+specifications/12-named-pki.md
+specifications/guides/named-pki-fr.md
+bin/pki-workspace.py

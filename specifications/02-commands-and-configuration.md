@@ -244,3 +244,12 @@ explicitly increments it without PKI bootstrap, OpenSSL or Git. LEVEL has no
 default; empty and unsupported values fail. These are source maintenance commands,
 not PKI operations. See [chapter 11](11-versioning-and-releases.md) for the exact
 version, changelog and archive contracts.
+
+## Named workspace selector
+
+`PKI=certnify-<slug>` selects a named direct child of the installation base for
+all operational Make targets and direct scripts. Omitted versus empty is
+significant. `make pki-name CN=...` derives the initial name without mutation;
+`make pki-info PKI=...` resolves authoritative paths and guard presence as JSON.
+The engine owns both interfaces; clients must not duplicate naming/path rules.
+See [named PKI workspaces](12-named-pki.md) for legacy and mixed-layout admission.

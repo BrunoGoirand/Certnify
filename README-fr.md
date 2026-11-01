@@ -520,3 +520,5 @@ ils peuvent conserver des copies de clés privées, protégées par des permissi
 restrictives. Un résultat de signature incertain, un plan incomplet, un déplacement
 d’autorité interrompu, un verrou périmé ou des données modifiées nécessitent encore
 un examen manuel. Aucun compteur n’est réinitialisé et aucun verrou n’est volé.
+
+[Espaces PKI nommés](specifications/guides/named-pki-fr.md)

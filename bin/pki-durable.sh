@@ -5,12 +5,12 @@
 PKI_DURABLE_OWNED=""
 PKI_DURABLE_KEEP=0
 PKI_DURABLE_COMPLETED=0
-durability() { python3 -B "$ROOT_DIR/bin/pki-durable.py" "$@" "$ROOT_DIR"; }
+durability() { python3 -B "$CERTNIFY_SOURCE_DIR/bin/pki-durable.py" "$@" "$ROOT_DIR"; }
 durability_flush() { durability flush || return 1; }
 durability_begin() {
   [[ -z "$PKI_DURABLE_OWNED" ]] || return 0
   PKI_DURABLE_COMPLETED=0
-  PKI_DURABLE_OWNED="$(python3 -B "$ROOT_DIR/bin/pki-durable.py" begin "$ROOT_DIR" "$$")" || return 1
+  PKI_DURABLE_OWNED="$(python3 -B "$CERTNIFY_SOURCE_DIR/bin/pki-durable.py" begin "$ROOT_DIR" "$$")" || return 1
 }
 durability_guard() {
   [[ -z "$PKI_DURABLE_OWNED" ]] || return 0

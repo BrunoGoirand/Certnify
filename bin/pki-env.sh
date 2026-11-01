@@ -20,10 +20,11 @@ PKI_CALL_DIR="$(pwd -P)"
 # ============================================
 
 # ---- Repo root & OpenSSL ----
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-export ROOT_DIR
+CERTNIFY_SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+ROOT_DIR="$CERTNIFY_SOURCE_DIR"
+export CERTNIFY_SOURCE_DIR ROOT_DIR
 export OPENSSL="${OPENSSL:-openssl}"
-export CERTNIFY_PROFILES_DIR="${CERTNIFY_PROFILES_DIR:-$ROOT_DIR/profiles}"
+export CERTNIFY_PROFILES_DIR="${CERTNIFY_PROFILES_DIR:-$CERTNIFY_SOURCE_DIR/profiles}"
 
 # ---- Security: private keys must not be world-readable ----
 umask 077
@@ -32,6 +33,10 @@ umask 077
 die(){ echo "[ERR] $*" >&2; exit 1; }
 info(){ echo "[OK ] $*"; }
 warn(){ echo "[!! ] $*" >&2; }
+
+# The Python resolver is also the public read-only interface used by clients.
+ROOT_DIR="$(python3 -B "$CERTNIFY_SOURCE_DIR/bin/pki-workspace.py" --path)" || die "Cannot resolve PKI workspace"
+export ROOT_DIR
 
 # Hooks are privileged code, not ordinary PKI parameters. Opt in before any
 # backend call or transaction; this is an accident guard, not a sandbox.
@@ -594,7 +599,7 @@ pki_records() {
   local mode="$1" input="$2"
   PKI_RECORD_MODE="$mode" PKI_RECORD_CN="${CN:-}" \
     PKI_RECORD_NOW="$(date -u +%Y%m%d%H%M%SZ)" \
-    LC_ALL=C awk -f "$ROOT_DIR/bin/pki-records.awk" "$input"
+    LC_ALL=C awk -f "$CERTNIFY_SOURCE_DIR/bin/pki-records.awk" "$input"
 }
 
 # Validate the full index and counter before any counter update. The caller owns
@@ -885,9 +890,9 @@ assert_intermediate_ready() {
 # Bash 3.2 may expose status zero to EXIT when source cannot open its file,
 # even with errexit or an OR-list. Refuse missing/unreadable inputs explicitly.
 for __CERTNIFY_HELPER in state crl policy recovery durable resume hold validity input; do
-  [[ -f "$ROOT_DIR/bin/pki-$__CERTNIFY_HELPER.sh" && -r "$ROOT_DIR/bin/pki-$__CERTNIFY_HELPER.sh" ]] \
+  [[ -f "$CERTNIFY_SOURCE_DIR/bin/pki-$__CERTNIFY_HELPER.sh" && -r "$CERTNIFY_SOURCE_DIR/bin/pki-$__CERTNIFY_HELPER.sh" ]] \
     || die "Cannot load helper: pki-$__CERTNIFY_HELPER.sh"
-  source "$ROOT_DIR/bin/pki-$__CERTNIFY_HELPER.sh"
+  source "$CERTNIFY_SOURCE_DIR/bin/pki-$__CERTNIFY_HELPER.sh"
 done
 unset __CERTNIFY_HELPER
 validate_public_inputs

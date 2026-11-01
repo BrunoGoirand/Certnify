@@ -38,4 +38,4 @@ fi
 # and takes over EXIT cleanup. It may exit on an idempotent path; do not append
 # caller work here. CN and normalized key/lifetime inputs above are its request.
 INT_DIR="$BASE_DIR"
-source "$ROOT_DIR/bin/gen-intm.sh"
+source "$CERTNIFY_SOURCE_DIR/bin/gen-intm.sh"

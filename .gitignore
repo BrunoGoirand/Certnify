@@ -40,3 +40,6 @@ draft/
 
 # Source version maintenance lock (never remove while an increment is running).
 /.version-bump.lock/
+
+# Named operational PKI workspaces
+/certnify-*/
