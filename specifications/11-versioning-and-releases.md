@@ -51,6 +51,37 @@ There is no automatic hook, `release-prepare` command, Git mutation, tagging or
 publication in version maintenance. Any later commit, `vMAJOR.MINOR.PATCH` tag or
 publication is a separate deliberate maintainer action after review.
 
+### Create and publish a Git tag
+
+From the `certnify` repository root, first commit the reviewed release changes,
+including VERSION and CHANGELOG.md. Confirm that HEAD is the intended release
+commit and that `origin` points to the intended GitHub repository:
+
+```sh
+git status --short
+git log -1 --oneline
+git remote -v
+git show HEAD:VERSION
+```
+
+Replace `vX.Y.Z` below with `v` followed by the committed VERSION. Run each
+command separately and stop if it fails:
+
+```sh
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+The first command creates an annotated tag on HEAD. The second publishes that
+specific tag to GitHub. Verify its remote presence with:
+
+```sh
+git ls-remote --exit-code --tags origin refs/tags/vX.Y.Z
+```
+
+A GitHub Release with release notes and attached assets is a separate publication
+step; pushing a tag does not itself create one.
+
 ## Source archives
 
 Use the explicit source distribution manifest, including runtime, profiles,

@@ -47,6 +47,37 @@ Aucun hook automatique ni commande `release-prepare` n’est installé. Les comm
 ne créent ni commit, ni tag, ni publication. Ces actions éventuelles, dont un tag
 `vMAJOR.MINOR.PATCH`, restent des décisions distinctes du mainteneur après revue.
 
+### Créer et publier un tag Git
+
+Depuis la racine du dépôt `certnify`, commiter d’abord les changements de version
+relus, notamment VERSION et CHANGELOG.md. Vérifier que HEAD est le commit à
+publier et que `origin` désigne le dépôt GitHub souhaité :
+
+```sh
+git status --short
+git log -1 --oneline
+git remote -v
+git show HEAD:VERSION
+```
+
+Remplacer `vX.Y.Z` ci-dessous par `v` suivi du VERSION commité. Exécuter chaque
+commande séparément et s’arrêter en cas d’échec :
+
+```sh
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+La première commande crée un tag annoté sur HEAD. La seconde publie ce tag précis
+sur GitHub. Vérifier sa présence distante avec :
+
+```sh
+git ls-remote --exit-code --tags origin refs/tags/vX.Y.Z
+```
+
+Une GitHub Release avec notes de version et pièces jointes constitue une étape
+de publication distincte ; pousser un tag ne la crée pas à lui seul.
+
 ## Archive sur manifeste explicite
 
 ```sh
