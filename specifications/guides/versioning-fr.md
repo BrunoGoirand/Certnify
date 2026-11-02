@@ -43,9 +43,9 @@ portant la version et la date de sortie, puis conserver Unreleased pour la suite
 Relire le diff et exécuter les tests pertinents. Les qualifications historiques ne
 qualifient pas automatiquement une nouvelle version.
 
-Aucun hook automatique ni commande `release-prepare` n’est installé. Les commandes
-ne créent ni commit, ni tag, ni publication. Ces actions éventuelles, dont un tag
-`vMAJOR.MINOR.PATCH`, restent des décisions distinctes du mainteneur après revue.
+L’utilitaire de version n’a aucun hook automatique ni effet Git. La publication
+Git reste une action explicite du mainteneur, manuelle ou réalisée par la commande
+de release groupée ci-dessous.
 
 ### Créer et publier un tag Git
 
@@ -102,3 +102,41 @@ Inspecter les membres et tester une extraction dans un emplacement jetable avant
 distribution, jamais dans une PKI opérationnelle. Voir le
 [contrat anglais](../11-versioning-and-releases.md) et les
 [instructions de test](../../test/README.md).
+
+## Commande de release groupée
+
+Après revue, tests et commit des changements et du changelog, utiliser :
+
+```sh
+python3 -B tools/release.py patch
+# Aperçu facultatif uniquement :
+python3 -B tools/release.py patch --dry-run
+# Autres choix : minor ou major
+```
+
+L’option facultative `--dry-run` affiche la prochaine version, le tag annoté et la
+destination de push d’origin (accès réseau en lecture nécessaire), sans modifier
+VERSION, les commits ni les tags. Sans cette option, la commande incrémente VERSION
+via l’utilitaire existant, commite uniquement VERSION sous `Release vX.Y.Z`, crée
+le tag annoté et pousse uniquement ce tag vers l’unique destination de push
+d’origin. L’objet tag distant est vérifié. Aucune branche n’est poussée ; aucune
+GitHub Release ni pièce jointe n’est créée. Le commit est accessible via le tag ;
+la branche peut être poussée séparément. L’authentification Git et l’identité
+auteur/commiteur doivent être disponibles. La commande ne lance pas les tests
+d’acceptation et ne modifie pas le changelog : préparer les notes pour la version
+visée dans le commit précédent.
+
+Un dépôt propre sur une branche, VERSION commité et un tag absent localement et
+à distance sont exigés. `.release.lock/` sérialise ces commandes ; aucune édition,
+incrémentation, création de commit ou publication concurrente. S’arrêter sur toute
+erreur : conserver version, commit et tag déjà créés et inspecter l’état local et
+distant avant toute nouvelle tentative. Aucun rollback, push forcé, remplacement
+de tag ni nouvelle tentative automatique. Un push refusé peut laisser une release
+locale ; une vérification distante échouée peut suivre une publication réussie.
+Une interruption peut conserver le verrou ; inspecter avant nettoyage manuel.
+Les hooks Git existants restent actifs. Aucune PKI ni skill installé n’est modifié.
+
+`python3 -B test/release.py -v` valide l’aperçu, les trois incréments, les tags
+annotés, les pushes limités aux tags, les refus de dépôt modifié/doublons et l’état
+conservé après un push refusé, avec des sources copiées par manifeste et des dépôts
+bare locaux ; cela ne constitue pas une publication GitHub.

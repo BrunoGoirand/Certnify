@@ -120,3 +120,6 @@ test/named-pki.py
 specifications/12-named-pki.md
 specifications/guides/named-pki-fr.md
 bin/pki-workspace.py
+
+tools/release.py
+test/release.py

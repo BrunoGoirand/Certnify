@@ -474,3 +474,9 @@ No duration is silently capped. Existing certificates and keys are not migrated.
 With sources installed in `.certnify`, new named PKIs are created beside it
 (`certnify-main-holding/`, for example). Existing nested PKIs remain accessible;
 duplicate names inside and beside the engine are refused. No automatic move occurs.
+
+Run `python3 -B tools/release.py patch` (`minor` or `major` also accepted) to
+commit VERSION, create and push its annotated tag. Add `--dry-run` for an optional
+preview without publication. Requires a
+clean checkout with reviewed changes/changelog already committed. See the
+[release contract](specifications/11-versioning-and-releases.md#combined-release-command).

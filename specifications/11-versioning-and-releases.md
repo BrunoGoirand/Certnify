@@ -47,9 +47,9 @@ into a section bearing that VERSION and the release date. Retain Unreleased for
 future work. Review the diff and run the relevant acceptance gates. Historical
 qualification records do not automatically qualify new versions.
 
-There is no automatic hook, `release-prepare` command, Git mutation, tagging or
-publication in version maintenance. Any later commit, `vMAJOR.MINOR.PATCH` tag or
-publication is a separate deliberate maintainer action after review.
+The version helper has no automatic hooks or Git side effects. Git publication
+is a deliberate maintainer action, either manually or through the explicit
+combined release command below.
 
 ### Create and publish a Git tag
 
@@ -110,3 +110,38 @@ Validate the archive's member list and test a separately extracted source tree
 before distributing it. Extraction and subsequent tests must use disposable
 locations, never an operational PKI. See [test guidance](../test/README.md) and
 [the French guide](guides/versioning-fr.md).
+
+## Combined release command
+
+After reviewing, testing and committing the changes and changelog, use:
+
+```sh
+python3 -B tools/release.py patch
+# Optional preview only:
+python3 -B tools/release.py patch --dry-run
+# Alternatives: minor or major
+```
+
+The optional `--dry-run` previews the next version, annotated tag and origin push
+destination (network read access is required), without modifying VERSION, commits
+or tags. Without this flag, the command increments VERSION
+through the existing helper, commits only VERSION as `Release vX.Y.Z`, creates
+an annotated tag and pushes only that tag to origin's single push destination.
+It verifies the remote tag object. No branch is pushed and no GitHub Release or
+asset is created. The commit is available through the tag; the branch can be
+pushed separately. Git authentication and configured author/committer identity
+must already be available. This command does not run acceptance tests or edit
+the changelog: prepare notes for the intended version in the preceding commit.
+
+A clean attached Git checkout, committed VERSION and absent local/remote tag are
+required. `.release.lock/` serializes these commands; do not edit, bump, commit or
+publish concurrently. Stop on any error: retain the version, commit or tag already
+created and inspect local/remote state before retrying. No rollback, force-push,
+tag replacement or automatic retry. A failed push may leave a local release;
+a failed remote verification may follow a successful publication. Interrupted
+processes may leave the lock; inspect before manual cleanup. Existing Git hooks
+remain active. No PKI state or installed skill is modified.
+
+`python3 -B test/release.py -v` validates preview, all three increments, annotated
+tags, tag-only pushes, dirty/duplicate rejection and retained state after rejected
+pushes using manifest-only fixtures and local bare remotes, not GitHub publication.

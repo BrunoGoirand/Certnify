@@ -527,3 +527,9 @@ Avec les sources installées dans `.certnify`, les nouvelles PKI nommées sont c
 à côté (`certnify-main-holding/`, par exemple). Les PKI déjà imbriquées restent
 accessibles ; les noms présents dedans et à côté sont refusés. Aucun déplacement
 automatique n’est effectué.
+
+Exécuter `python3 -B tools/release.py patch` (`minor` ou `major` également) pour
+commiter VERSION, créer et pousser le tag annoté. Ajouter `--dry-run` pour un
+aperçu facultatif sans publication. Le dépôt
+doit être propre, avec changements et changelog relus et déjà commités. Voir le
+[contrat de release](specifications/guides/versioning-fr.md#commande-de-release-groupée).
