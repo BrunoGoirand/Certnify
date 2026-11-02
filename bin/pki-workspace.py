@@ -23,8 +23,10 @@ def resolve(source, selector=None):
     source = Path(source).resolve(strict=True)
     if not source.is_dir():
         raise ValueError('Source base must be a directory')
+    base = source.parent if source.name == '.certnify' else source
     if selector is None:
-        if any(p.is_dir() or p.is_symlink() for p in source.glob('certnify-*')):
+        if any(p.is_dir() or p.is_symlink()
+               for directory in {source, base} for p in directory.glob('certnify-*')):
             raise ValueError('Select a named workspace explicitly with PKI=certnify-<name>')
         workspace = source
     else:
@@ -34,7 +36,13 @@ def resolve(source, selector=None):
         legacy = ['root', 'intermediate', 'pki-data', 'out', '.locks', '.recovery']
         if any(os.path.lexists(source / n) for n in legacy) or any(source.glob('intm-*')):
             raise ValueError('Legacy PKI state exists in source base; named workspaces require a source-only installation')
-        workspace = source / selector
+        workspace = base / selector
+        # Keep existing nested installations usable; never silently choose a duplicate.
+        nested = source / selector
+        if base != source and os.path.lexists(nested):
+            if os.path.lexists(workspace):
+                raise ValueError('Ambiguous PKI selector: both nested and sibling workspaces exist')
+            workspace = nested
         if workspace.is_symlink() or (workspace.exists() and not workspace.is_dir()):
             raise ValueError('PKI workspace must be a physical directory, never a symlink')
         if workspace.exists() and workspace.resolve() != workspace:

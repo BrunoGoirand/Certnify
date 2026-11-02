@@ -4,7 +4,13 @@
 
 Sources and profiles belong to CERTNIFY_SOURCE_DIR, computed from the installed
 scripts. ROOT_DIR is the selected operational workspace, never a caller override.
-The public PKI=certnify-<slug> selector chooses a direct child of the source base.
+The public PKI=certnify-<slug> selector chooses a sibling of the source base when
+its physical directory name is `.certnify`, and a direct child otherwise.
+For example, `PKI/.certnify` uses `PKI/certnify-main-holding` for new state.
+Existing nested workspaces remain accessible without moving them. If the selected
+name exists both inside and beside `.certnify`, resolution refuses the ambiguity,
+including files and dangling symlinks. No automatic migration is performed.
+Without PKI, named directories in either location prevent legacy fallback.
 The engine validates names (ASCII lowercase alphanumeric groups separated by
 hyphens, at most 80 characters including the prefix), rejects symlink/non-directory
 workspaces and confines authority paths to that selected workspace.
@@ -22,7 +28,7 @@ No implicit workspace selection or migration is provided. Without PKI, legacy
 state in the source base remains supported only if no named workspace is present.
 
 All PKI state, including counters, index, keys, CRLs, issuer bindings, exports,
-locks, recovery journals and durability fences, is inside the selected child.
+locks, recovery journals and durability fences, is inside the selected workspace.
 Shared source/profile lookup never follows ROOT_DIR. Relative authority paths
 are relative to the selected workspace. A peer's absolute paths are refused.
 Commands continue to run from the source base, with the same explicit PKI value:

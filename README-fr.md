@@ -522,3 +522,8 @@ d’autorité interrompu, un verrou périmé ou des données modifiées nécessi
 un examen manuel. Aucun compteur n’est réinitialisé et aucun verrou n’est volé.
 
 [Espaces PKI nommés](specifications/guides/named-pki-fr.md)
+
+Avec les sources installées dans `.certnify`, les nouvelles PKI nommées sont créées
+à côté (`certnify-main-holding/`, par exemple). Les PKI déjà imbriquées restent
+accessibles ; les noms présents dedans et à côté sont refusés. Aucun déplacement
+automatique n’est effectué.

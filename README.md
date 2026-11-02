@@ -470,3 +470,7 @@ No duration is silently capped. Existing certificates and keys are not migrated.
 - [Compatibility and supported limits](specifications/09-compatibility-and-limitations.md)
 
 [Named PKI workspaces](specifications/12-named-pki.md)
+
+With sources installed in `.certnify`, new named PKIs are created beside it
+(`certnify-main-holding/`, for example). Existing nested PKIs remain accessible;
+duplicate names inside and beside the engine are refused. No automatic move occurs.

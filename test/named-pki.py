@@ -132,5 +132,50 @@ class NamedPKI(unittest.TestCase):
         self.assertFalse((self.base / 'certnify-missing').exists())
 
 
+class SiblingPKI(NamedPKI):
+    def setUp(self):
+        super().setUp()
+        destination = self.base.parent / '.certnify'
+        self.base.rename(destination)
+        self.base = destination
+
+    # Run the full lifecycle suite with the original physical PKI directories:
+    # nested state remains supported when the engine is renamed to .certnify.
+    def hierarchy(self, pki):
+        (self.base / pki).mkdir()
+        super().hierarchy(pki)
+
+    def test_readonly_resolver_and_legacy_guard(self):
+        before = snapshot(self.base)
+        result = json.loads(self.run_make('pki-info', 'certnify-new').stdout)
+        self.assertEqual(result['workspace'], str(self.base.parent / 'certnify-new'))
+        self.assertFalse(result['exists'])
+        self.assertEqual(snapshot(self.base), before)
+        (self.base / '.recovery').mkdir()
+        self.run_make('pki-info', 'certnify-new', ok=False)
+
+    def test_sibling_lifecycle_and_conflicts(self):
+        pki = 'certnify-sibling'
+        NamedPKI.hierarchy(self, pki)
+        workspace = self.base.parent / pki
+        self.assertTrue((workspace / 'root/certs/ca.cert.pem').is_file())
+        self.assertFalse((self.base / pki).exists())
+        self.run_make('verify', pki, KIND='web', CN='app.test')
+        self.run_make('pki-info', ok=False)
+        before = snapshot(workspace)
+        (self.base / pki).mkdir()
+        self.run_make('pki-info', pki, ok=False)
+        self.run_make('verify', pki, ok=False, KIND='web', CN='app.test')
+        self.assertEqual(snapshot(workspace), before)
+        for name, symlink in [('certnify-link-sibling', True), ('certnify-file', False)]:
+            path = self.base.parent / name
+            if symlink:
+                path.symlink_to(workspace, target_is_directory=True)
+            else:
+                path.touch()
+            self.run_make('pki-info', name, ok=False)
+        self.assertEqual(snapshot(workspace), before)
+
+
 if __name__ == '__main__':
     unittest.main()

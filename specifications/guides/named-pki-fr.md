@@ -5,7 +5,13 @@
 Les sources et profils appartiennent à CERTNIFY_SOURCE_DIR, calculé depuis les
 scripts installés. ROOT_DIR désigne l’espace opérationnel sélectionné et ne peut
 pas être imposé par l’appelant. Le paramètre public PKI=certnify-<slug> sélectionne
-un enfant direct de la base. Le moteur valide le nom (groupes alphanumériques
+un voisin de la base lorsque son nom physique est `.certnify`, sinon un enfant
+direct. Par exemple, `PKI/.certnify` utilise `PKI/certnify-main-holding` pour les
+nouvelles PKI. Les espaces déjà imbriqués restent accessibles sans déplacement.
+Si le nom sélectionné existe à la fois dedans et à côté de `.certnify`, la résolution
+refuse cette ambiguïté, y compris pour les fichiers et liens symboliques cassés.
+Aucune migration automatique. Sans PKI, la présence de répertoires nommés à l'un
+ou l'autre emplacement interdit le repli historique. Le moteur valide le nom (groupes alphanumériques
 ASCII minuscules séparés par des tirets, 80 caractères maximum préfixe compris),
 refuse liens symboliques et fichiers, et confine les chemins à cet espace.
 
@@ -22,7 +28,7 @@ collision de nom. Aucune sélection implicite ni migration. Sans PKI, le mode
 historique reste disponible uniquement si aucune PKI nommée n’est présente.
 
 Tout l’état de la PKI (clés, certificats, index, compteurs, CRL, liaisons émetteurs,
-exports, verrous, récupération et barrières de durabilité) réside dans cet enfant.
+exports, verrous, récupération et barrières de durabilité) réside dans cet espace.
 Les sources/profils partagés ne suivent jamais ROOT_DIR. Les chemins relatifs
 partent de l’espace sélectionné ; les chemins absolus d’une voisine sont refusés.
 Exécuter les commandes depuis la base des sources avec le même PKI explicite :
